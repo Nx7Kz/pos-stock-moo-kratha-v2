@@ -174,12 +174,45 @@ check('ลูกค้าสั่งอาหารเองด้วยรห�
 check('รอบแรก', x.json.round_no === 1, x.json.round_no);
 check('ยอด = 299 + 30 = 329', r(x.json.order.grand_total) === 329, x.json.order?.grand_total);
 
+const t12New = async () => (await call('GET', '/tables')).json.data.find((t) => t.table_no === 'T12').new_items;
+let n = await t12New();
+check('ผังร้านแจ้งออเดอร์ใหม่ 2 รายการ', n === 2, n);
+
+x = await call('POST', `/orders/${custOrderId}/seen`);
+n = await t12New();
+check('พนักงานเปิดดูบิลแล้ว ป้ายออเดอร์ใหม่หายไป', x.status === 200 && n === 0, n);
+
 x = await call('POST', '/public/tables/T12/order', { items: [{ menu_sku: 'MN-B16', qty: 2 }] }, cust);
 check('ลูกค้าสั่งเพิ่ม รอบที่ 2', x.json.round_no === 2, x.json.round_no);
 check('ยอด = 329 + 30 = 359', r(x.json.order.grand_total) === 359, x.json.order?.grand_total);
+n = await t12New();
+check('สั่งเพิ่มหลังพนักงานดูแล้ว -> ออเดอร์ใหม่ 1 รายการ', n === 1, n);
+
+console.log('\n=== 9.1 หน้าจอครัว ===');
+x = await call('GET', '/kitchen');
+const k12 = x.json.data.filter((i) => i.table_no === 'T12');
+check('คิวครัวมีรายการของ T12 ครบ 3 รายการ', x.status === 200 && k12.length === 3, k12.map((i) => i.name_th));
+check('คิวเรียงจากสั่งก่อน (รอบ 1 มาก่อนรอบ 2)', k12[0].round_no === 1 && k12[2].round_no === 2, k12.map((i) => i.round_no));
+const round1 = k12.filter((i) => i.round_no === 1).map((i) => i.id);
+
+x = await call('POST', '/kitchen/serve', { item_ids: round1 });
+check('เสิร์ฟครบรอบแรก -> served 2', x.status === 200 && x.json.served === 2, x.json);
+x = await call('GET', '/kitchen');
+check('คิวเหลือเฉพาะรอบ 2', x.json.data.filter((i) => i.table_no === 'T12').length === 1, x.json.count);
+
+x = await call('POST', '/kitchen/serve', { item_ids: round1 });
+check('กดเสิร์ฟซ้ำ -> ไม่นับซ้ำ', x.json.served === 0, x.json);
+
+x = await call('POST', '/kitchen/unserve', { item_ids: [round1[0]] });
+check('ย้อนกลับ 1 รายการ -> กลับเข้าคิว', x.json.restored === 1 && (await call('GET', '/kitchen')).json.data.filter((i) => i.table_no === 'T12').length === 2, x.json);
+
+x = await call('POST', '/kitchen/serve', { item_ids: [] });
+check('ไม่ระบุ item_ids -> 400', x.status === 400, x.json);
 
 x = await call('GET', '/public/tables/T12/bill', null, cust);
 check('ลูกค้าดูสรุปบิลได้', x.status === 200 && x.json.data.grand_total === 359, x.json.data?.grand_total);
+check('ลูกค้าเห็นสถานะอาหาร: เสิร์ฟแล้ว 1 / รอทำ 2', x.json.data.items.filter((i) => i.status === 'SERVED').length === 1
+  && x.json.data.items.filter((i) => i.status === 'ORDERED').length === 2, x.json.data.items.map((i) => i.status));
 
 x = await call('POST', '/public/tables/T12/bill', null, cust);
 check('ลูกค้าเรียกเช็คบิลเอง', x.json.data.status === 'BILLING', x.json.data?.status);

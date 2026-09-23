@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { api, auth } from '../lib/api';
 import { TopBar } from '../components/Layout';
-import { Modal, useToast, Spinner, Empty } from '../components/ui';
+import { Modal, useToast, Spinner, SkeletonTable, Empty } from '../components/ui';
 import { baht, qty as fmtQty, GROUP_LABEL } from '../lib/format';
+import MenuThumb from '../components/MenuThumb';
+import { resizeImage } from '../lib/image';
 
 export default function MenuManage() {
   const toast = useToast();
@@ -58,13 +60,13 @@ export default function MenuManage() {
           </div>
         </div>
 
-        {loading ? <Spinner /> : (
+        {loading ? <SkeletonTable rows={10} cols={8} label="กำลังโหลดเมนู…" /> : (
           <div className="card">
             <div className="tbl-wrap">
               <table className="tbl">
                 <thead>
                   <tr>
-                    <th>รหัส</th><th>ชื่อเมนู</th><th>หมวดหมู่</th>
+                    <th style={{ width: 64 }}>รูป</th><th>รหัส</th><th>ชื่อเมนู</th><th>หมวดหมู่</th>
                     <th className="num">ราคาขาย</th><th className="num">สูตร BOM</th>
                     <th className="num">ทำได้สูงสุด</th><th>สถานะ</th><th></th>
                   </tr>
@@ -72,6 +74,7 @@ export default function MenuManage() {
                 <tbody>
                   {shown.map((m) => (
                     <tr key={m.id}>
+                      <td><MenuThumb item={m} className="tbl-thumb" /></td>
                       <td className="tiny faint">{m.sku}</td>
                       <td>
                         <div className="bold">{m.name_th}</div>
@@ -106,14 +109,15 @@ export default function MenuManage() {
         )}
       </div>
 
-      {detail && <RecipeModal id={detail} isOwner={isOwner} onClose={() => setDetail(null)} onSaved={() => { setDetail(null); load(); }} />}
+      {detail && <RecipeModal id={detail} isOwner={isOwner} onClose={() => setDetail(null)} onSaved={() => { setDetail(null); load(); }}
+        onImageChanged={(row) => setItems((xs) => xs.map((x) => (x.id === row.id ? { ...x, image_url: row.image_url } : x)))} />}
       {creating && <CreateMenuModal categories={categories} onClose={() => setCreating(false)} onDone={() => { setCreating(false); load(); }} />}
     </>
   );
 }
 
 /* ------------------------------------------- ดู/แก้สูตรอาหาร BOM ของเมนู */
-function RecipeModal({ id, isOwner, onClose, onSaved }) {
+function RecipeModal({ id, isOwner, onClose, onSaved, onImageChanged }) {
   const toast = useToast();
   const [data, setData] = useState(null);
   const [ingredients, setIngredients] = useState([]);
@@ -179,6 +183,9 @@ function RecipeModal({ id, isOwner, onClose, onSaved }) {
       }
     >
       <div className="stack">
+        <MenuImageEditor item={data} isOwner={isOwner}
+          onChanged={(row) => { setData((d) => ({ ...d, image_url: row.image_url })); onImageChanged?.(row); }} />
+
         <div className="alert alert-info">
           <span>ℹ</span>
           <div>ทุกครั้งที่ขายเมนูนี้ 1 {data.unit} ระบบจะตัดวัตถุดิบตามสูตรด้านล่างออกจากคลังทันที</div>
@@ -269,6 +276,7 @@ function RecipeModal({ id, isOwner, onClose, onSaved }) {
 function CreateMenuModal({ categories, onClose, onDone }) {
   const toast = useToast();
   const [f, setF] = useState({ sku: '', name_th: '', category_code: 'BBQ', price: '', unit: 'จาน', description: '' });
+  const [image, setImage] = useState(null);   // data URL ของรูปที่ย่อแล้ว รอส่งตอนกดบันทึก
   const [busy, setBusy] = useState(false);
   const set = (patch) => setF((v) => ({ ...v, ...patch }));
 
@@ -276,12 +284,30 @@ function CreateMenuModal({ categories, onClose, onDone }) {
     if (!f.sku || !f.name_th || f.price === '') return toast('กรอก รหัส ชื่อเมนู และราคาให้ครบ', 'err');
     setBusy(true);
     try {
-      await api.post('/menu', { ...f, price: Number(f.price) });
+      const r = await api.post('/menu', { ...f, price: Number(f.price) });
+      if (image) {
+        try {
+          await api.post(`/menu/${r.data.id}/image`, { data: image });
+        } catch (e) {
+          // เมนูสร้างแล้ว แค่รูปไม่ผ่าน -> ใส่รูปใหม่ได้ภายหลังจากปุ่ม "ดูสูตร"
+          toast(`เพิ่มเมนูแล้ว แต่อัปโหลดรูปไม่สำเร็จ: ${e.message}`, 'err');
+          return onDone();
+        }
+      }
       toast('เพิ่มเมนูเรียบร้อย — อย่าลืมกำหนดสูตร BOM', 'ok');
       onDone();
     } catch (e) {
       toast(e.message, 'err');
       setBusy(false);
+    }
+  }
+
+  async function pickImage(file) {
+    if (!file) return;
+    try {
+      setImage(await resizeImage(file));   // ย่อรูปไว้ก่อน ส่งจริงตอนกดบันทึก
+    } catch (e) {
+      toast(e.message, 'err');
     }
   }
 
@@ -292,11 +318,28 @@ function CreateMenuModal({ categories, onClose, onDone }) {
       footer={
         <>
           <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-accent" onClick={save} disabled={busy}>บันทึก</button>
+          <button className="btn btn-accent" onClick={save} disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึก'}</button>
         </>
       }
     >
       <div className="stack">
+        <div className="img-editor">
+          <MenuThumb item={{ image_url: image, category_code: f.category_code, name_th: f.name_th }}
+            key={image || f.category_code} className="img-editor-thumb" />
+          <div className="stack-sm">
+            <div className="bold small">รูปเมนู <span className="faint">(ไม่บังคับ)</span></div>
+            <div className="tiny faint">{image ? 'รูปนี้จะบันทึกพร้อมเมนู' : 'ยังไม่มีรูป — จะแสดงไอคอนหมวดแทน'}</div>
+            <div className="row wrap">
+              <label className={`btn btn-sm${busy ? ' disabled' : ''}`}>
+                {image ? 'เปลี่ยนรูป' : 'ใส่รูป'}
+                <input type="file" accept="image/*" hidden disabled={busy}
+                  onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ''; }} />
+              </label>
+              {image && <button className="btn btn-sm btn-danger" onClick={() => setImage(null)} disabled={busy}>เอารูปออก</button>}
+            </div>
+          </div>
+        </div>
+
         <div className="grid-2">
           <div className="field">
             <label>รหัสเมนู (SKU)</label>
@@ -329,5 +372,65 @@ function CreateMenuModal({ categories, onClose, onDone }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+/* ------------------------------------------------ รูปเมนู: ใส่ / เปลี่ยน / ลบ */
+function MenuImageEditor({ item, isOwner, onChanged }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  async function upload(file) {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const data = await resizeImage(file);   // ย่อก่อนส่ง รูปจากมือถือจะได้ไม่หนัก
+      const r = await api.post(`/menu/${item.id}/image`, { data });
+      toast(r.message, 'ok');
+      onChanged(r.data);
+    } catch (e) {
+      toast(e.message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    try {
+      const r = await api.del(`/menu/${item.id}/image`);
+      toast(r.message, 'ok');
+      onChanged(r.data);
+    } catch (e) {
+      toast(e.message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="img-editor">
+      <MenuThumb item={item} key={item.image_url || 'none'} className="img-editor-thumb" />
+      <div className="stack-sm">
+        <div className="bold small">รูปเมนู</div>
+        <div className="tiny faint">
+          {item.image_url ? 'ลูกค้าจะเห็นรูปนี้ในหน้าเมนู' : 'ยังไม่มีรูป — ตอนนี้แสดงไอคอนหมวดแทน'}
+          {item.image_url?.startsWith('/media/samples/') && ' (รูปตัวอย่าง)'}
+        </div>
+        {isOwner && (
+          <div className="row wrap">
+            <label className={`btn btn-sm${busy ? ' disabled' : ''}`}>
+              {busy ? 'กำลังอัปโหลด…' : item.image_url ? 'เปลี่ยนรูป' : 'ใส่รูป'}
+              <input type="file" accept="image/*" hidden disabled={busy}
+                onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ''; }} />
+            </label>
+            {item.image_url && (
+              <button className="btn btn-sm btn-danger" onClick={remove} disabled={busy}>ลบรูป</button>
+            )}
+          </div>
+        )}
+        {isOwner && <div className="tiny faint">ถ่ายจากมือถือได้เลย ระบบย่อรูปให้อัตโนมัติ</div>}
+      </div>
+    </div>
   );
 }

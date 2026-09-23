@@ -123,7 +123,7 @@ router.post('/tables/:tableNo/order', wrap(async (req, res) => {
 
     const roundNo = await nextRound(client, order.id);
     const alerts = [];
-    for (const it of items) alerts.push(...await addItem(client, order, it, null, roundNo));
+    for (const it of items) alerts.push(...await addItem(client, order, it, null, roundNo, { byCustomer: true }));
 
     await recalcOrder(client, order.id);
     await syncTableStatus(client, order.table_id);
@@ -159,6 +159,7 @@ router.get('/tables/:tableNo/bill', wrap(async (req, res) => {
           id: i.id, name_th: i.name_th, category_name: i.category_name,
           qty: Number(i.qty), unit_price: Number(i.unit_price),
           line_total: Number(i.line_total), round_no: i.round_no, note: i.note,
+          status: i.status,   // ORDERED = รอทำ, SERVED = เสิร์ฟแล้ว
         })),
       subtotal: order.subtotal,
       discount: order.discount,
@@ -177,7 +178,7 @@ router.post('/tables/:tableNo/bill', wrap(async (req, res) => {
     const { order } = await openSession(client, req, { lock: true });
     if (order.status === 'BILLING') throw new AppError(409, 'โต๊ะนี้เช็คบิลไปแล้ว');
 
-    await client.query(`UPDATE orders SET status = 'BILLING' WHERE id = $1`, [order.id]);
+    await client.query(`UPDATE orders SET status = 'BILLING', billing_at = now() WHERE id = $1`, [order.id]);
     await recalcOrder(client, order.id);
     await syncTableStatus(client, order.table_id);
     return getOrderFull(client, order.id);

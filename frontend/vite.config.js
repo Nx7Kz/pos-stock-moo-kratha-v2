@@ -8,6 +8,9 @@ export default defineConfig({
     // เปิดให้มือถือในวง WiFi เดียวกันเข้าได้ (ลูกค้าสแกน QR ที่โต๊ะ)
     host: true,
     // เรียก /api ได้ตรง ๆ โดยไม่ติด CORS ระหว่างพัฒนา
-    proxy: { '/api': { target: 'http://localhost:4000', changeOrigin: true } },
+    proxy: {
+      '/api': { target: 'http://localhost:4000', changeOrigin: true },
+      '/media': { target: 'http://localhost:4000', changeOrigin: true },   // รูปเมนู
+    },
   },
 });

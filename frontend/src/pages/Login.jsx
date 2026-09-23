@@ -28,7 +28,7 @@ export default function Login() {
     <div className="login-wrap">
       <div className="login-card">
         <div className="login-head">
-          <div className="login-logo">ย</div>
+          <img className="login-logo-img" src="/logo.jpg" alt="บ้านน้องโฟค" />
           <h1>ร้านย่างให้หมูกระทะ บ้านน้องโฟค</h1>
           <p>ระบบขายหน้าร้านและจัดการสต็อก · กาญจนบุรี</p>
         </div>

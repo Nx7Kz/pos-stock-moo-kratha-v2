@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { TopBar } from '../components/Layout';
-import { useToast, Spinner, Empty } from '../components/ui';
+import { useToast, SkeletonTable, Empty } from '../components/ui';
 import { baht, num, dateTime, todayISO } from '../lib/format';
 
 const STATUS = {
@@ -57,7 +57,7 @@ export default function OrderList() {
           ))}
         </div>
 
-        {loading ? <Spinner /> : !rows.length ? <Empty icon="🧾">ไม่พบบิลในช่วงเวลาที่เลือก</Empty> : (
+        {loading ? <SkeletonTable rows={8} cols={7} label="กำลังโหลดบิล…" /> : !rows.length ? <Empty icon="🧾">ไม่พบบิลในช่วงเวลาที่เลือก</Empty> : (
           <div className="card">
             <div className="tbl-wrap">
               <table className="tbl">

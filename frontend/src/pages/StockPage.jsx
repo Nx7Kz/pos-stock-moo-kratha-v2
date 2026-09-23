@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api, auth } from '../lib/api';
 import { TopBar } from '../components/Layout';
-import { Modal, useToast, Spinner, Empty } from '../components/ui';
+import { Modal, useToast, SkeletonTable, Empty } from '../components/ui';
 import { baht, qty as fmtQty, dateTime, STOCK_STATUS, GROUP_LABEL } from '../lib/format';
 
 const MOVE_LABEL = { IN: 'รับเข้า', ISSUE: 'เบิกใช้', SALE: 'ตัดจากการขาย', RETURN: 'คืนสต็อก', ADJUST: 'ปรับยอด' };
@@ -73,7 +73,7 @@ export default function StockPage() {
           <button className={`cat-tab${tab === 'moves' ? ' active' : ''}`} onClick={() => setTab('moves')}>ประวัติการเคลื่อนไหว</button>
         </div>
 
-        {loading ? <Spinner /> : tab === 'stock' ? (
+        {loading ? <SkeletonTable rows={10} cols={8} label="กำลังโหลดคลังวัตถุดิบ…" /> : tab === 'stock' ? (
           <div className="card">
             <div className="card-head">
               <h2>วัตถุดิบคงเหลือ</h2>

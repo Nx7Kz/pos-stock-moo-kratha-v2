@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { auth } from './lib/api';
-import { ToastProvider } from './components/ui';
+import { ToastProvider, ConfirmProvider } from './components/ui';
 import Layout from './components/Layout';
 
 import Login from './pages/Login';
@@ -12,7 +12,7 @@ import Receipt from './pages/Receipt';
 import MenuManage from './pages/MenuManage';
 import StockPage from './pages/StockPage';
 import Reports from './pages/Reports';
-import TableQr from './pages/TableQr';
+import Kitchen from './pages/Kitchen';
 import CustomerMenu from './pages/customer/CustomerMenu';
 import CustomerBill from './pages/customer/CustomerBill';
 
@@ -24,30 +24,32 @@ function Protected({ children }) {
 export default function App() {
   return (
     <ToastProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
+      <ConfirmProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
 
-          {/* ---------------------------------------- ฝั่งลูกค้า (ไม่ต้องล็อกอิน) */}
-          <Route path="/customer/:tableNo" element={<CustomerMenu />} />
-          <Route path="/customer/:tableNo/bill" element={<CustomerBill />} />
+            {/* ---------------------------------------- ฝั่งลูกค้า (ไม่ต้องล็อกอิน) */}
+            <Route path="/customer/:tableNo" element={<CustomerMenu />} />
+            <Route path="/customer/:tableNo/bill" element={<CustomerBill />} />
 
-          {/* ------------------------------------------------------ ฝั่งร้านค้า */}
-          <Route element={<Protected><Layout /></Protected>}>
-            <Route index element={<FloorPlan />} />
-            <Route path="/orders" element={<OrderList />} />
-            <Route path="/order/:id" element={<OrderScreen />} />
-            <Route path="/payment/:id" element={<Payment />} />
-            <Route path="/receipt/:id" element={<Receipt />} />
-            <Route path="/menu" element={<MenuManage />} />
-            <Route path="/stock" element={<StockPage />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/tables/qr" element={<TableQr />} />
-          </Route>
+            {/* ------------------------------------------------------ ฝั่งร้านค้า */}
+            <Route element={<Protected><Layout /></Protected>}>
+              <Route index element={<FloorPlan />} />
+              <Route path="/orders" element={<OrderList />} />
+              <Route path="/kitchen" element={<Kitchen />} />
+              <Route path="/order/:id" element={<OrderScreen />} />
+              <Route path="/payment/:id" element={<Payment />} />
+              <Route path="/receipt/:id" element={<Receipt />} />
+              <Route path="/menu" element={<MenuManage />} />
+              <Route path="/stock" element={<StockPage />} />
+              <Route path="/reports" element={<Reports />} />
+            </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </ConfirmProvider>
     </ToastProvider>
   );
 }

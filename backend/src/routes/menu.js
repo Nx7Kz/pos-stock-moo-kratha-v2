@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query, withTransaction } from '../db.js';
 import { AppError, wrap } from '../utils.js';
 import { authRequired, requireRole } from '../middleware/auth.js';
+import { saveImage, removeUpload } from '../media.js';
 
 const router = Router();
 
@@ -123,6 +124,27 @@ router.patch('/:id', authRequired, requireRole('OWNER'), wrap(async (req, res) =
   );
   if (!rows[0]) throw new AppError(404, 'ไม่พบเมนูที่ระบุ');
   res.json({ ok: true, data: rows[0] });
+}));
+
+/**
+ * POST /api/menu/:id/image — อัปโหลดรูปเมนู (แทนรูปเดิม)
+ * body: { data: "data:image/jpeg;base64,..." }  หน้าเว็บย่อรูปก่อนส่ง
+ */
+router.post('/:id/image', authRequired, requireRole('OWNER'), wrap(async (req, res) => {
+  const { rows: cur } = await query('SELECT id, sku, image_url FROM menu_items WHERE id = $1', [req.params.id]);
+  if (!cur[0]) throw new AppError(404, 'ไม่พบเมนูที่ระบุ');
+  const url = saveImage(req.body?.data, cur[0].sku);   // เขียนทับไฟล์เดิมของเมนูนี้ (ชื่อไฟล์ = รหัสเมนู)
+  const { rows } = await query('UPDATE menu_items SET image_url = $2 WHERE id = $1 RETURNING *', [cur[0].id, url]);
+  res.json({ ok: true, message: 'บันทึกรูปเมนูแล้ว', data: rows[0] });
+}));
+
+/** DELETE /api/menu/:id/image — ลบรูปเมนู (กลับไปใช้ไอคอนหมวด) */
+router.delete('/:id/image', authRequired, requireRole('OWNER'), wrap(async (req, res) => {
+  const { rows: cur } = await query('SELECT id, sku FROM menu_items WHERE id = $1', [req.params.id]);
+  if (!cur[0]) throw new AppError(404, 'ไม่พบเมนูที่ระบุ');
+  const { rows } = await query('UPDATE menu_items SET image_url = NULL WHERE id = $1 RETURNING *', [cur[0].id]);
+  removeUpload(cur[0].sku);
+  res.json({ ok: true, message: 'ลบรูปเมนูแล้ว', data: rows[0] });
 }));
 
 /** PUT /api/menu/:id/recipe — กำหนดสูตรอาหาร (BOM) ใหม่ทั้งชุด */

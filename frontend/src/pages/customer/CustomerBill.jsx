@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { useToast, Spinner, Empty } from '../../components/ui';
+import { useToast, useConfirm, Spinner, Empty } from '../../components/ui';
 import { baht, qty as fmtQty, timeOnly } from '../../lib/format';
 import { setCode, clearCode, publicOpts, sessionProblem } from './session';
 import CodeGate from './CodeGate';
+import ThemeToggle from '../../components/ThemeToggle';
 
 /**
  * รายการที่สั่งของโต๊ะ — ลูกค้าไม่ต้องจ่ายผ่านมือถือ
@@ -14,6 +15,7 @@ export default function CustomerBill() {
   const { tableNo } = useParams();
   const nav = useNavigate();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [bill, setBill] = useState(null);
   const [paid, setPaid] = useState(false);     // บิลที่เคยเห็นหายไป = พนักงานรับชำระแล้ว
@@ -43,13 +45,18 @@ export default function CustomerBill() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 15000);   // อัปเดตยอด และรู้ว่าชำระที่เคาน์เตอร์เสร็จแล้ว
+    const id = setInterval(load, 10000);   // อัปเดตสถานะอาหาร / ยอด และรู้ว่าชำระที่เคาน์เตอร์เสร็จแล้ว
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableNo]);
 
   async function callBill() {
-    if (!confirm('ต้องการเช็คบิลตอนนี้ใช่ไหม?\nหลังเช็คบิลจะสั่งอาหารเพิ่มเองไม่ได้')) return;
+    if (!(await confirm({
+      title: 'เช็คบิลตอนนี้เลยไหม?',
+      message: 'หลังเช็คบิลจะสั่งอาหารเพิ่มเองไม่ได้\nถ้าต้องการสั่งเพิ่มภายหลังกรุณาแจ้งพนักงาน',
+      confirmLabel: 'เช็คบิล',
+      cancelLabel: 'ยังก่อน',
+    }))) return;
     setBusy(true);
     try {
       await api.post(`/public/tables/${tableNo}/bill`, null, publicOpts(tableNo));
@@ -62,7 +69,21 @@ export default function CustomerBill() {
     }
   }
 
-  if (loading) return <Spinner label="กำลังโหลดรายการ…" />;
+  if (loading) {
+    return (
+      <div className="cust-page">
+        <div className="cust-top">
+          <div className="cust-top-inner">
+            <div className="grow center">
+              <div className="bold">รายการที่สั่ง</div>
+              <div className="tiny faint">โต๊ะ {tableNo}</div>
+            </div>
+          </div>
+        </div>
+        <div className="cust-shell"><div className="content"><Spinner label="กำลังโหลดรายการ…" lines={7} /></div></div>
+      </div>
+    );
+  }
   if (problem && !paid) {
     return (
       <CodeGate tableNo={tableNo} problem={problem} onRetry={load}
@@ -71,9 +92,10 @@ export default function CustomerBill() {
   }
 
   const isBilling = bill?.status === 'BILLING';
+  const servedCount = bill ? bill.items.filter((i) => i.status === 'SERVED').length : 0;
 
   return (
-    <>
+    <div className="cust-page">
       <div className="cust-top">
         <div className="cust-top-inner">
           <button className="btn btn-sm" onClick={() => nav(`/customer/${tableNo}`)}>‹ เมนู</button>
@@ -81,7 +103,7 @@ export default function CustomerBill() {
             <div className="bold">รายการที่สั่ง</div>
             <div className="tiny faint">โต๊ะ {tableNo}</div>
           </div>
-          <span style={{ width: 58 }} />
+          <div style={{ width: 58, display: 'flex', justifyContent: 'flex-end' }}><ThemeToggle /></div>
         </div>
       </div>
 
@@ -107,6 +129,13 @@ export default function CustomerBill() {
                   <span className="sub">{bill.guest_count} ท่าน · เปิดโต๊ะ {timeOnly(bill.opened_at)} น.</span>
                 </div>
 
+                {bill.items.length > 0 && (
+                  <div className="food-progress">
+                    <span>เสิร์ฟแล้ว <strong>{servedCount}</strong> จาก {bill.items.length} รายการ</span>
+                    <div className="bar-track"><div className="bar-fill" style={{ width: `${(servedCount / bill.items.length) * 100}%` }} /></div>
+                  </div>
+                )}
+
                 <div className="card-body flush">
                   {groupByRound(bill.items).map(([round, items]) => (
                     <div key={round}>
@@ -116,10 +145,15 @@ export default function CustomerBill() {
                       {items.map((it) => (
                         <div key={it.id} className="line">
                           <div className="line-main">
-                            <div className="line-name">{it.name_th}</div>
+                            <div className="line-name">
+                              {it.name_th}
+                              {it.status === 'SERVED'
+                                ? <span className="food-st is-served">✓ เสิร์ฟแล้ว</span>
+                                : <span className="food-st is-waiting">รอทำ</span>}
+                            </div>
                             <div className="line-meta">
                               {baht(it.unit_price)} × {fmtQty(it.qty)}
-                              {it.note && ` · ${it.note}`}
+                              {it.note && <span className="item-note"> · 📝 {it.note}</span>}
                             </div>
                           </div>
                           <div className="line-amt">{baht(it.line_total)}</div>
@@ -173,7 +207,7 @@ export default function CustomerBill() {
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

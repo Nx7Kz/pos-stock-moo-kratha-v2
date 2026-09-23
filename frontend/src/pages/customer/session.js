@@ -24,3 +24,38 @@ export function sessionProblem(err) {
   const reason = err?.details?.reason;
   return reason ? { reason, message: err.message } : null;
 }
+
+// ------------------------------------------------ ตะกร้าที่ยังไม่ได้กดสั่ง
+// เก็บไว้ในเครื่อง เผลอรีเฟรชหรือปิดแท็บแล้วเปิดใหม่ ของที่เลือกไว้ยังอยู่
+const cartKey = (tableNo) => `table_cart:${tableNo}`;
+const CART_TTL_MS = 6 * 60 * 60 * 1000;   // เกิน 6 ชั่วโมงถือว่าเป็นตะกร้าของมื้อก่อน ทิ้งไป
+
+function readCart(tableNo) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(cartKey(tableNo)) || 'null');
+    return saved && Date.now() - saved.at <= CART_TTL_MS ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+/** { menu_item_id: qty } */
+export function loadCart(tableNo) {
+  return readCart(tableNo)?.items || {};
+}
+
+/** { menu_item_id: "ไม่ใส่พริก" } หมายเหตุที่พิมพ์ไว้ในตะกร้า */
+export function loadCartNotes(tableNo) {
+  return readCart(tableNo)?.notes || {};
+}
+
+export function saveCart(tableNo, items, notes = {}) {
+  try {
+    if (Object.keys(items).length) localStorage.setItem(cartKey(tableNo), JSON.stringify({ items, notes, at: Date.now() }));
+    else localStorage.removeItem(cartKey(tableNo));
+  } catch { /* ไม่เป็นไร */ }
+}
+
+export function clearCart(tableNo) {
+  try { localStorage.removeItem(cartKey(tableNo)); } catch { /* ไม่เป็นไร */ }
+}

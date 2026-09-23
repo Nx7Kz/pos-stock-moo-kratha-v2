@@ -1,10 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { useToast, Spinner, Empty, Modal } from '../../components/ui';
+import { useToast, Sk, SkeletonCards, Empty, Modal } from '../../components/ui';
 import { baht } from '../../lib/format';
-import { setCode, clearCode, publicOpts, sessionProblem } from './session';
+import { setCode, clearCode, publicOpts, sessionProblem, loadCart, loadCartNotes, saveCart, clearCart } from './session';
 import CodeGate from './CodeGate';
+import OrderPlaced from './OrderPlaced';
+import MenuThumb from '../../components/MenuThumb';
+import ThemeToggle from '../../components/ThemeToggle';
+import StickyCatTabs from '../../components/StickyCatTabs';
 
 export default function CustomerMenu() {
   const { tableNo } = useParams();
@@ -17,18 +21,22 @@ export default function CustomerMenu() {
   const [table, setTable] = useState(null);
   const [cat, setCat] = useState('ALL');
   const [search, setSearch] = useState('');
-  const [cart, setCart] = useState({});
+  const [cart, setCart] = useState(() => loadCart(tableNo));   // ยังอยู่แม้รีเฟรชหน้า
+  const [notes, setNotes] = useState(() => loadCartNotes(tableNo));   // { menu_item_id: "ไม่ใส่พริก" }
+  const [bump, setBump] = useState(0);                          // เพิ่มของทีไร ตะกร้าเด้งที
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [placed, setPlaced] = useState(null);     // สั่งสำเร็จ -> โชว์หน้ายืนยัน
   const [problem, setProblem] = useState(null);   // รหัสผิด / ยังไม่มีรหัส / โต๊ะยังไม่เปิด
 
-  /** สถานะโต๊ะ + ยอดสะสม (อัปเดตหลังสั่งอาหาร) */
   /** error เรื่องรหัสโต๊ะ -> เปลี่ยนไปหน้ากรอกรหัส, error อื่นแสดงเป็น toast */
   function handleError(e) {
     const p = sessionProblem(e);
     if (!p) return toast(e.message, 'err');
     if (p.reason === 'CODE_INVALID' || p.reason === 'TABLE_NOT_OPEN') clearCode(tableNo);
+    // บิลปิดไปแล้ว ของในตะกร้าเป็นของมื้อก่อน ทิ้งไป
+    if (p.reason === 'TABLE_NOT_OPEN') { clearCart(tableNo); setCart({}); setNotes({}); }
     setProblem(p);
     setConfirmOpen(false);
   }
@@ -68,6 +76,8 @@ export default function CustomerMenu() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableNo]);
 
+  useEffect(() => { saveCart(tableNo, cart, notes); }, [tableNo, cart, notes]);
+
   async function enterCode(code) {
     setCode(tableNo, code);
     await loadTable();
@@ -84,12 +94,25 @@ export default function CustomerMenu() {
   const total = lines.reduce((s, l) => s + Number(l.item.price) * l.qty, 0);
   const count = lines.reduce((s, l) => s + l.qty, 0);
 
-  const add = (m) => setCart((c) => ({ ...c, [m.id]: (c[m.id] || 0) + 1 }));
-  const setQty = (id, q) =>
+  const add = (m) => {
+    setCart((c) => ({ ...c, [m.id]: (c[m.id] || 0) + 1 }));
+    setBump((b) => b + 1);
+  };
+  const setQty = (id, q) => {
     setCart((c) => {
       const n = { ...c };
       if (q <= 0) delete n[id]; else n[id] = q;
       return n;
+    });
+    if (q <= 0) setNote(id, '');
+    if (q > (cart[id] || 0)) setBump((b) => b + 1);
+  };
+
+  const setNote = (id, text) =>
+    setNotes((n) => {
+      const next = { ...n };
+      if (text) next[id] = text; else delete next[id];
+      return next;
     });
 
   async function submit() {
@@ -97,11 +120,13 @@ export default function CustomerMenu() {
     setBusy(true);
     try {
       const r = await api.post(`/public/tables/${tableNo}/order`,
-        { items: lines.map((l) => ({ menu_item_id: l.item.id, qty: l.qty })) },
+        { items: lines.map((l) => ({ menu_item_id: l.item.id, qty: l.qty, note: notes[l.item.id]?.trim() || undefined })) },
         publicOpts(tableNo));
-      // สั่งแล้วอยู่หน้าเมนูต่อ สั่งเพิ่มได้เรื่อย ๆ ไปจ่ายเงินที่เคาน์เตอร์ตอนกลับ
-      toast(`ส่งออเดอร์เข้าครัวแล้ว (${r.round_no > 1 ? `รอบที่ ${r.round_no}` : 'รอบแรก'})`, 'ok');
+      // โชว์หน้ายืนยันชัด ๆ แล้วกลับมาสั่งเพิ่มได้เรื่อย ๆ ไปจ่ายเงินที่เคาน์เตอร์ตอนกลับ
+      setPlaced(r);
       setCart({});
+      setNotes({});
+      clearCart(tableNo);
       setConfirmOpen(false);
       loadTable();
     } catch (e) {
@@ -111,23 +136,31 @@ export default function CustomerMenu() {
     }
   }
 
-  if (loading) return <Spinner label="กำลังโหลดเมนู…" />;
+  if (loading) return <MenuSkeleton tableNo={tableNo} />;
   if (problem) return <CodeGate tableNo={tableNo} problem={problem} onSubmit={enterCode} onRetry={loadTable} />;
+  if (placed) {
+    return (
+      <OrderPlaced tableNo={tableNo} result={placed}
+        onMore={() => setPlaced(null)}
+        onBill={() => nav(`/customer/${tableNo}/bill`)} />
+    );
+  }
 
   const isBilling = table?.status === 'BILLING';
 
   return (
-    <>
+    <div className="cust-page">
       <div className="cust-top">
         <div className="cust-top-inner">
-          <div className="brand-dot">ย</div>
+          <img className="brand-logo" src="/logo-mark.png" alt="" />
           <div className="grow">
-            <div className="bold">ร้านย่างให้หมูกระทะ บ้านน้องโฟค</div>
+            <div className="cust-brand">บ้านน้องโฟค หมูกระทะ</div>
             <div className="tiny faint">
               โต๊ะ {tableNo}
               {table?.order_no && ` · ยอดสะสม ${baht(table.current_total)} ฿`}
             </div>
           </div>
+          <ThemeToggle />
           <button className="btn btn-sm" onClick={() => nav(`/customer/${tableNo}/bill`)}>รายการที่สั่ง</button>
         </div>
       </div>
@@ -148,36 +181,39 @@ export default function CustomerMenu() {
 
           <input className="input" placeholder="ค้นหาเมนู…" value={search} onChange={(e) => setSearch(e.target.value)} />
 
-          <div className="cat-tabs">
-            <button className={`cat-tab${cat === 'ALL' ? ' active' : ''}`} onClick={() => setCat('ALL')}>ทั้งหมด</button>
-            {categories.map((c) => (
-              <button key={c.id} className={`cat-tab${cat === c.code ? ' active' : ''}`} onClick={() => setCat(c.code)}>
-                {c.name_th}
-              </button>
-            ))}
-          </div>
+          <StickyCatTabs categories={categories} cat={cat} onChange={setCat} />
 
           {!shown.length ? <Empty icon="🔍">ไม่พบเมนูที่ค้นหา</Empty> : (
             <div className="menu-grid">
               {shown.map((m) => {
                 const inCart = cart[m.id] || 0;
+                const canAdd = !m.sold_out && !isBilling;
+                // แตะตรงไหนของการ์ดก็เพิ่มลงตะกร้าได้ ไม่ต้องเล็งที่ปุ่ม
+                const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
                 return (
-                  <div key={m.id} className="menu-card" style={m.sold_out ? { opacity: .5 } : undefined}>
-                    <div className="menu-name">{m.name_th}</div>
-                    {m.description && <div className="menu-desc">{m.description}</div>}
-                    <div className="menu-foot">
-                      <span className="menu-price">{baht(m.price)}</span>
-                      {m.sold_out ? (
-                        <span className="pill pill-danger">หมด</span>
-                      ) : inCart > 0 ? (
-                        <div className="qty-box">
-                          <button className="qty-btn" onClick={() => setQty(m.id, inCart - 1)}>−</button>
-                          <span className="qty-num">{inCart}</span>
-                          <button className="qty-btn" onClick={() => setQty(m.id, inCart + 1)}>+</button>
-                        </div>
-                      ) : (
-                        <button className="btn btn-sm btn-accent" onClick={() => add(m)} disabled={isBilling}>เพิ่ม</button>
-                      )}
+                  <div key={m.id} className={`menu-card cust-card${inCart > 0 ? ' in-cart' : ''}${m.sold_out ? ' sold-out' : ''}`}
+                    role="button" tabIndex={canAdd ? 0 : -1} aria-disabled={!canAdd}
+                    onClick={() => canAdd && add(m)}
+                    onKeyDown={(e) => canAdd && (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), add(m))}>
+                    <MenuThumb item={m} />
+                    {inCart > 0 && <span key={`b${inCart}`} className="thumb-count pop">{inCart}</span>}
+                    <div className="menu-body">
+                      <div className="menu-name">{m.name_th}</div>
+                      {m.description && <div className="menu-desc">{m.description}</div>}
+                      <div className="menu-foot">
+                        <span className="menu-price">{baht(m.price)}</span>
+                        {m.sold_out ? (
+                          <span className="pill pill-danger">หมด</span>
+                        ) : inCart > 0 ? (
+                          <div className="qty-box qty-lg">
+                            <button className="qty-btn" aria-label="ลดจำนวน" onClick={stop(() => setQty(m.id, inCart - 1))}>−</button>
+                            <span key={inCart} className="qty-num pop">{inCart}</span>
+                            <button className="qty-btn" aria-label="เพิ่มจำนวน" onClick={stop(() => setQty(m.id, inCart + 1))} disabled={isBilling}>+</button>
+                          </div>
+                        ) : (
+                          <button className="btn btn-accent add-btn" onClick={stop(() => add(m))} disabled={isBilling}>+ เพิ่ม</button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -190,11 +226,14 @@ export default function CustomerMenu() {
       {count > 0 && (
         <div className="cust-cart">
           <div className="cust-cart-inner">
-            <div className="grow">
-              <div className="bold">ตะกร้า {count} รายการ</div>
-              <div className="tiny faint">ตรวจสอบก่อนส่งเข้าครัว</div>
+            <div key={bump} className="cart-icon bump" aria-label={`ตะกร้า ${count} ชิ้น`}>
+              🛒<span className="cart-count">{count}</span>
             </div>
-            <div className="bold" style={{ fontSize: 19 }}>{baht(total)} ฿</div>
+            <div className="grow">
+              <div className="bold">ตะกร้า {count} ชิ้น</div>
+              <div className="tiny faint">ยังไม่ได้สั่ง</div>
+            </div>
+            <div key={`t${bump}`} className="bold pop" style={{ fontSize: 19 }}>{baht(total)} ฿</div>
             <button className="btn btn-accent btn-lg" onClick={() => setConfirmOpen(true)} disabled={isBilling}>
               ดูตะกร้า
             </button>
@@ -217,16 +256,21 @@ export default function CustomerMenu() {
         >
           <div className="stack-sm">
             {lines.map((l) => (
-              <div key={l.item.id} className="row">
-                <div className="grow">
-                  <div className="bold small">{l.item.name_th}</div>
-                  <div className="tiny faint">{baht(l.item.price)} × {l.qty}</div>
+              <div key={l.item.id} className="cart-line">
+                <div className="row">
+                  <div className="grow">
+                    <div className="bold small">{l.item.name_th}</div>
+                    <div className="tiny faint">{baht(l.item.price)} × {l.qty}</div>
+                  </div>
+                  <div className="qty-box">
+                    <button className="qty-btn" onClick={() => setQty(l.item.id, l.qty - 1)} disabled={busy}>−</button>
+                    <span className="qty-num">{l.qty}</span>
+                    <button className="qty-btn" onClick={() => setQty(l.item.id, l.qty + 1)} disabled={busy}>+</button>
+                  </div>
                 </div>
-                <div className="qty-box">
-                  <button className="qty-btn" onClick={() => setQty(l.item.id, l.qty - 1)} disabled={busy}>−</button>
-                  <span className="qty-num">{l.qty}</span>
-                  <button className="qty-btn" onClick={() => setQty(l.item.id, l.qty + 1)} disabled={busy}>+</button>
-                </div>
+                <input className="input input-sm note-input" maxLength={100} disabled={busy}
+                  placeholder="หมายเหตุ เช่น ไม่ใส่พริก (ไม่บังคับ)"
+                  value={notes[l.item.id] || ''} onChange={(e) => setNote(l.item.id, e.target.value)} />
               </div>
             ))}
             {!lines.length && <div className="muted small">ตะกร้าว่าง</div>}
@@ -234,6 +278,31 @@ export default function CustomerMenu() {
           </div>
         </Modal>
       )}
-    </>
+    </div>
+  );
+}
+
+/** หน้าตาจำลองระหว่างโหลดเมนู: หัวร้านจริง + กล่องเทาแทนเมนู */
+function MenuSkeleton({ tableNo }) {
+  return (
+    <div className="cust-page">
+      <div className="cust-top">
+        <div className="cust-top-inner">
+          <img className="brand-logo" src="/logo-mark.png" alt="" />
+          <div className="grow">
+            <div className="cust-brand">บ้านน้องโฟค หมูกระทะ</div>
+            <div className="tiny faint">โต๊ะ {tableNo}</div>
+          </div>
+        </div>
+      </div>
+      <div className="cust-shell">
+        <div className="content stack">
+          <Sk h={50} r={10} />
+          <Sk h={40} r={8} />
+          <div className="row">{[64, 80, 104, 84].map((w, i) => <Sk key={i} w={w} h={34} r={17} />)}</div>
+          <SkeletonCards kind="menu" count={6} label="กำลังโหลดเมนู…" />
+        </div>
+      </div>
+    </div>
   );
 }

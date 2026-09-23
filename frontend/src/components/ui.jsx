@@ -48,6 +48,55 @@ export function Modal({ title, onClose, children, footer, wide }) {
   );
 }
 
+/* ---------------------------------------------------------------- confirm */
+// หน้าต่างยืนยันของระบบ ใช้แทน window.confirm() ของเบราว์เซอร์
+// const confirm = useConfirm();  if (!(await confirm({ title, message, confirmLabel, danger }))) return;
+const ConfirmCtx = createContext(async () => false);
+export const useConfirm = () => useContext(ConfirmCtx);
+
+export function ConfirmProvider({ children }) {
+  const [req, setReq] = useState(null);   // { title, message, confirmLabel, cancelLabel, danger, resolve }
+
+  const ask = useCallback((opts) => new Promise((resolve) => setReq({ ...opts, resolve })), []);
+  const answer = (ok) => { req.resolve(ok); setReq(null); };
+
+  useEffect(() => {
+    if (!req) return;
+    // จับ Esc ก่อนหน้าต่างอื่นที่เปิดอยู่ข้างใต้ จะได้ปิดแค่กล่องยืนยัน
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      answer(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [req]);
+
+  return (
+    <ConfirmCtx.Provider value={ask}>
+      {children}
+      {req && (
+        <div className="overlay confirm-overlay" onMouseDown={(e) => e.target === e.currentTarget && answer(false)}>
+          <div className="modal confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+            <div className="modal-body">
+              <div className={`confirm-icon${req.danger ? ' danger' : ''}`} aria-hidden="true">{req.danger ? '!' : '?'}</div>
+              <h3 id="confirm-title" className="confirm-title">{req.title}</h3>
+              {req.message && <div className="confirm-msg">{req.message}</div>}
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => answer(false)}>{req.cancelLabel || 'ยกเลิก'}</button>
+              <button autoFocus className={`btn ${req.danger ? 'btn-danger-solid' : 'btn-accent'}`} onClick={() => answer(true)}>
+                {req.confirmLabel || 'ยืนยัน'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </ConfirmCtx.Provider>
+  );
+}
+
 /* --------------------------------------------------------------- QR image */
 export function QrImage({ payload, size = 240 }) {
   const [src, setSrc] = useState('');
@@ -72,8 +121,80 @@ export function Empty({ icon = '🍽️', children }) {
   );
 }
 
-export function Spinner({ label = 'กำลังโหลด…' }) {
-  return <div className="empty">{label}</div>;
+/* --------------------------------------------------------------- skeleton */
+// กล่องเทาจำลองหน้าตาระหว่างโหลดข้อมูล (แทนข้อความ "กำลังโหลด…")
+// label ใช้เป็นข้อความสำหรับโปรแกรมอ่านหน้าจอ
+export function Sk({ w = '100%', h = 12, r, style, className = '' }) {
+  // h = null -> ให้ CSS กำหนดความสูงเอง (เช่นช่องรูปที่ใช้ aspect-ratio)
+  return <span className={`sk ${className}`} style={{ width: w, ...(h === null ? {} : { height: h }), borderRadius: r, ...style }} />;
+}
+
+/** แบบทั่วไป: การ์ดที่มีหัวข้อ + บรรทัดข้อความ */
+export function Spinner({ label = 'กำลังโหลด…', lines = 5 }) {
+  return (
+    <div className="sk-wrap" role="status" aria-label={label}>
+      <div className="card sk-card">
+        <Sk w="38%" h={16} />
+        {Array.from({ length: lines }, (_, i) => <Sk key={i} w={`${92 - ((i * 17) % 35)}%`} />)}
+      </div>
+    </div>
+  );
+}
+
+/** แถวตัวเลขสรุปด้านบนหน้า */
+export function SkeletonStats({ count = 4 }) {
+  return (
+    <div className="stats" aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="stat"><Sk w="45%" h={11} /><Sk w="35%" h={24} style={{ margin: '8px 0 6px' }} /><Sk w="60%" h={10} /></div>
+      ))}
+    </div>
+  );
+}
+
+/** ตาราง: หัวตาราง + แถวข้อมูล */
+export function SkeletonTable({ rows = 8, cols = 6, label = 'กำลังโหลดข้อมูล…' }) {
+  return (
+    <div className="card sk-table" role="status" aria-label={label}>
+      <div className="sk-row sk-head">{Array.from({ length: cols }, (_, c) => <Sk key={c} w={c === 1 ? '28%' : '10%'} h={10} />)}</div>
+      {Array.from({ length: rows }, (_, r) => (
+        <div key={r} className="sk-row">
+          {Array.from({ length: cols }, (_, c) => <Sk key={c} w={c === 1 ? `${22 + ((r * 7) % 14)}%` : '9%'} h={c === 1 ? 13 : 11} />)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * การ์ดหลายใบในตาราง grid
+ * kind: 'table' = การ์ดโต๊ะในผังร้าน, 'menu' = การ์ดเมนูมีรูป, 'ticket' = ใบสั่งในหน้าจอครัว
+ */
+export function SkeletonCards({ kind = 'menu', count = 8, className = '', label = 'กำลังโหลด…' }) {
+  const grid = { table: 'floor-grid', menu: 'menu-grid', ticket: 'k-grid' }[kind];
+  return (
+    <div className={`${grid} ${className}`} role="status" aria-label={label}>
+      {Array.from({ length: count }, (_, i) => (
+        kind === 'table' ? (
+          <div key={i} className="sk-tcard">
+            <div className="row-between"><Sk w={46} h={20} /><Sk w={54} h={20} r={12} /></div>
+            <Sk w={50} h={10} />
+            <Sk w="60%" h={10} style={{ marginTop: 'auto' }} />
+          </div>
+        ) : kind === 'ticket' ? (
+          <div key={i} className="sk-tcard" style={{ minHeight: 190 }}>
+            <div className="row-between"><Sk w={70} h={22} /><Sk w={48} h={16} /></div>
+            {Array.from({ length: 3 + (i % 2) }, (_, j) => <Sk key={j} h={38} r={8} />)}
+          </div>
+        ) : (
+          <div key={i} className="sk-mcard">
+            <Sk h={null} r={0} className="sk-thumb" />
+            <div className="sk-mbody"><Sk w="75%" h={13} /><Sk w="55%" h={10} /><Sk w="35%" h={15} style={{ marginTop: 6 }} /></div>
+          </div>
+        )
+      ))}
+    </div>
+  );
 }
 
 /** เรียก API แล้วคืน { data, loading, error, reload } */

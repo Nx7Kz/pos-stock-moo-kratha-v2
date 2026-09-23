@@ -179,7 +179,7 @@ router.post('/:id/bill', authRequired, wrap(async (req, res) => {
   const data = await withTransaction(async (client) => {
     const order = await lockOpenOrder(client, req.params.id);
     if (order.status === 'BILLING') throw new AppError(409, 'บิลนี้อยู่ในสถานะรอชำระเงินอยู่แล้ว');
-    await client.query(`UPDATE orders SET status = 'BILLING' WHERE id = $1`, [order.id]);
+    await client.query(`UPDATE orders SET status = 'BILLING', billing_at = now() WHERE id = $1`, [order.id]);
     await recalcOrder(client, order.id);
     await syncTableStatus(client, order.table_id);
     return getOrderFull(client, order.id);
@@ -205,6 +205,19 @@ router.patch('/:id', authRequired, wrap(async (req, res) => {
     return getOrderFull(client, order.id);
   });
   res.json({ ok: true, data });
+}));
+
+/**
+ * POST /api/orders/:id/seen — พนักงานเปิดดูบิลแล้ว
+ * ป้าย "ออเดอร์ใหม่" ของโต๊ะนี้บนผังร้านจะหายไป
+ */
+router.post('/:id/seen', authRequired, wrap(async (req, res) => {
+  const { rows } = await query(
+    'UPDATE orders SET staff_seen_at = now() WHERE id = $1 RETURNING staff_seen_at',
+    [req.params.id]
+  );
+  if (!rows[0]) throw new AppError(404, `ไม่พบบิล id=${req.params.id}`);
+  res.json({ ok: true, data: rows[0] });
 }));
 
 /**
@@ -276,10 +289,15 @@ export async function nextRound(client, orderId) {
   return Number(rows[0].next);
 }
 
-/** เพิ่มรายการอาหาร 1 บรรทัด + ตัดสต็อกตาม BOM */
-export async function addItem(client, order, input, userId, roundNo = 1) {
+/**
+ * เพิ่มรายการอาหาร 1 บรรทัด + ตัดสต็อกตาม BOM
+ * byCustomer = ลูกค้าสั่งเองผ่านมือถือ ใช้แจ้งเตือนหน้าร้านว่ามีออเดอร์ใหม่
+ */
+export async function addItem(client, order, input, userId, roundNo = 1, { byCustomer = false } = {}) {
   const qty = Number(input.qty ?? 1);
   if (!(qty > 0)) throw new AppError(400, 'จำนวนต้องมากกว่า 0');
+  // หมายเหตุต่อรายการ เช่น "ไม่ใส่พริก" ว่างเปล่าถือว่าไม่มี ยาวเกินตัดทิ้ง
+  const note = String(input.note ?? '').trim().slice(0, 100) || null;
 
   const { rows: menu } = await client.query(
     `SELECT m.*, c.name_th AS category_name FROM menu_items m
@@ -299,9 +317,9 @@ export async function addItem(client, order, input, userId, roundNo = 1) {
   }
 
   await client.query(
-    `INSERT INTO order_items (order_id, menu_item_id, qty, unit_price, line_total, note, round_no)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [order.id, item.id, qty, item.price, money(qty * Number(item.price)), input.note ?? null, roundNo]
+    `INSERT INTO order_items (order_id, menu_item_id, qty, unit_price, line_total, note, round_no, by_customer)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [order.id, item.id, qty, item.price, money(qty * Number(item.price)), note, roundNo, byCustomer]
   );
 
   return applyRecipe(client, {

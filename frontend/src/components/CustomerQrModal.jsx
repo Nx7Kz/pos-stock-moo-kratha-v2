@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
-import { getCustomerBase, customerUrl, isLocalHost } from '../lib/customerUrl';
+import { getQrInfo, customerUrl, isLocalHost, lanUrl } from '../lib/customerUrl';
+import { auth } from '../lib/api';
 import { dateTime } from '../lib/format';
-import { Modal, QrImage, useToast } from './ui';
+import { Modal, QrImage, useToast, useConfirm } from './ui';
 
 /**
  * QR สั่งอาหารของบิลที่เปิดอยู่ พร้อมรหัสโต๊ะ 4 หลัก
@@ -10,12 +11,23 @@ import { Modal, QrImage, useToast } from './ui';
  */
 export default function CustomerQrModal({ order, onClose, onChanged, extraActions }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [base, setBase] = useState('');
+  const [lan, setLan] = useState([]);
+  const [editBase, setEditBase] = useState(null);   // ช่องแก้ที่อยู่เว็บ (null = ปิดอยู่)
+  const isOwner = auth.user?.role === 'OWNER';
   const [shopName, setShopName] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    getCustomerBase().then(setBase).catch((e) => toast(e.message, 'err'));
+    getQrInfo()
+      .then((q) => {
+        setBase(q.base);
+        setLan(q.lan);
+        // QR ชี้ localhost มือถือเปิดไม่ได้ -> เปิดช่องแก้ให้เจ้าของร้านเลย
+        if (isLocalHost(q.base) && isOwner) setEditBase(q.base);
+      })
+      .catch((e) => toast(e.message, 'err'));
     api.get('/settings').then((r) => setShopName(r.data.shop_name || '')).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -25,12 +37,33 @@ export default function CustomerQrModal({ order, onClose, onChanged, extraAction
   const url = base && code ? customerUrl(base, order.table_no) : '';
 
   async function regenerate() {
-    if (code && !confirm(`เปลี่ยนรหัสโต๊ะ ${order.table_no}?\nลูกค้าที่ใช้รหัสเดิมจะสั่งอาหารไม่ได้ ต้องสแกน QR ใหม่`)) return;
+    if (code && !(await confirm({
+      title: `เปลี่ยนรหัสโต๊ะ ${order.table_no}?`,
+      message: `รหัสเดิม ${code} จะใช้ไม่ได้ทันที\nลูกค้าที่โต๊ะนี้ต้องกรอกรหัสใหม่ก่อนสั่งอาหาร`,
+      confirmLabel: 'เปลี่ยนรหัส',
+    }))) return;
     setBusy(true);
     try {
       const r = await api.post(`/orders/${order.id}/access-code`);
       toast(r.message, 'ok');
       onChanged?.(r.data);
+    } catch (e) {
+      toast(e.message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** บันทึกที่อยู่เว็บที่ใส่ใน QR (เช่นลิงก์ Cloudflare ที่เปลี่ยนทุกครั้งที่เปิด tunnel ใหม่) */
+  async function saveBase() {
+    const clean = editBase.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\/[^\s/]+/i.test(clean)) return toast('ที่อยู่เว็บต้องขึ้นต้นด้วย http:// หรือ https://', 'err');
+    setBusy(true);
+    try {
+      await api.patch('/settings', { customer_base_url: clean });
+      setBase(clean);
+      setEditBase(null);
+      toast('บันทึกที่อยู่เว็บแล้ว QR อัปเดตให้แล้ว', 'ok');
     } catch (e) {
       toast(e.message, 'err');
     } finally {
@@ -82,9 +115,39 @@ export default function CustomerQrModal({ order, onClose, onChanged, extraAction
           {base && isLocalHost(base) && (
             <div className="alert alert-danger no-print">
               <span>⚠</span>
-              <div>QR ชี้ไปที่ localhost มือถือลูกค้าจะเปิดไม่ได้ — ตั้งที่อยู่เว็บที่หน้า <strong>QR Code ประจำโต๊ะ</strong></div>
+              <div>
+                QR ชี้ไปที่ localhost มือถือลูกค้าจะเปิดไม่ได้ —{' '}
+                {isOwner ? 'ใส่ที่อยู่เว็บที่มือถือเปิดได้ในช่องด้านล่าง' : 'ให้เจ้าของร้านตั้งที่อยู่เว็บก่อน'}
+              </div>
             </div>
           )}
+
+          {isOwner && (editBase === null ? (
+            <button className="link-btn no-print" onClick={() => setEditBase(base)}>
+              ⚙ ตั้งค่าที่อยู่เว็บใน QR {base && <span className="faint">({base})</span>}
+            </button>
+          ) : (
+            <div className="base-editor no-print">
+              <label className="small bold">ที่อยู่เว็บที่มือถือลูกค้าเปิดได้</label>
+              <div className="row">
+                <input className="input grow" value={editBase} onChange={(e) => setEditBase(e.target.value)}
+                  placeholder="เช่น https://xxxx.trycloudflare.com" />
+                <button className="btn btn-accent" onClick={saveBase} disabled={busy || !editBase.trim()}>บันทึก</button>
+              </div>
+              {lan.length > 0 && (
+                <div className="row wrap tiny">
+                  <span className="faint">ใช้ WiFi ร้าน:</span>
+                  {lan.map((ip) => (
+                    <button key={ip} className="btn btn-sm" onClick={() => setEditBase(lanUrl(ip))}>{lanUrl(ip)}</button>
+                  ))}
+                </div>
+              )}
+              <div className="tiny faint">
+                ใช้ Cloudflare Tunnel ให้ใส่ลิงก์ https://….trycloudflare.com ที่ได้ตอนเปิด tunnel (ลิงก์เปลี่ยนทุกครั้งที่เปิดใหม่)
+              </div>
+              <button className="link-btn" onClick={() => setEditBase(null)} disabled={busy}>ปิด</button>
+            </div>
+          ))}
           <div className="tiny faint center no-print">
             ลูกค้าสแกน QR แล้วกรอกรหัสนี้ · ใช้ได้จนกว่าจะปิดบิล
           </div>

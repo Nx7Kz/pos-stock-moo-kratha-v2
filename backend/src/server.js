@@ -8,6 +8,7 @@ import morgan from 'morgan';
 
 import { pool, query } from './db.js';
 import { wrap } from './utils.js';
+import { MEDIA_DIR, syncUploadedImages } from './media.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { authRequired, requireRole } from './middleware/auth.js';
 
@@ -20,11 +21,14 @@ import paymentRoutes from './routes/payments.js';
 import stockRoutes from './routes/stock.js';
 import reportRoutes from './routes/reports.js';
 import publicRoutes from './routes/public.js';
+import kitchenRoutes from './routes/kitchen.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
 
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') ?? true }));
+// อัปโหลดรูปเมนูส่งมาเป็น base64 ใน JSON ต้องรับก้อนใหญ่กว่าปกติ (ต้องมาก่อน parser ตัวหลัก)
+app.use('/api/menu/:id/image', express.json({ limit: '4mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
 
@@ -68,6 +72,11 @@ app.use('/api/payments',    paymentRoutes);
 app.use('/api/stock',       stockRoutes);
 app.use('/api/reports',     reportRoutes);
 app.use('/api/public',      publicRoutes);
+app.use('/api/kitchen',     kitchenRoutes);
+
+// รูปเมนู: /media/samples = รูปตัวอย่างที่มากับระบบ, /media/uploads = รูปที่ร้านอัปโหลดเอง
+app.use('/media', express.static(MEDIA_DIR, { maxAge: '7d' }));
+app.use('/media', (_req, res) => res.status(404).json({ ok: false, error: 'ไม่พบไฟล์รูป' }));
 
 // เสิร์ฟหน้าเว็บที่ build แล้ว (frontend/dist) จากพอร์ตเดียวกับ API
 // ใช้ตอนเปิดระบบออกอินเทอร์เน็ต (เช่น Cloudflare Tunnel) แทน Vite dev server
@@ -85,6 +94,10 @@ const server = app.listen(PORT, () => {
   console.log(`\n  POS & Stock API`);
   console.log(`  ร้านย่างให้หมูกระทะ บ้านน้องโฟค กาญจนบุรี`);
   console.log(`  http://localhost:${PORT}/api/health\n`);
+  // รูปเมนูที่อัปโหลดไว้ใน media/uploads (มากับ git) -> ผูกกับเมนูตามรหัส
+  syncUploadedImages(query)
+    .then((n) => n && console.log(`  รูปเมนู: ใช้รูปที่อัปโหลดไว้ ${n} เมนู\n`))
+    .catch((e) => console.error('  ซิงก์รูปเมนูไม่สำเร็จ:', e.message));
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

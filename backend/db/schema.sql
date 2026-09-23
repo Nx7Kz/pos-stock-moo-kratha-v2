@@ -134,6 +134,8 @@ CREATE TABLE orders (
     grand_total    NUMERIC(12,2) NOT NULL DEFAULT 0,
     note           TEXT,
     access_code    VARCHAR(8),   -- รหัส 4 หลักให้ลูกค้าสั่งอาหารเองได้ ใช้ได้เฉพาะตอนบิลยังเปิดอยู่
+    billing_at     TIMESTAMPTZ,  -- เวลาที่กดเช็คบิล ใช้เรียงคิวรอชำระเงินบนผังร้าน
+    staff_seen_at  TIMESTAMPTZ,  -- พนักงานเปิดดูบิลล่าสุด (รายการที่ลูกค้าสั่งหลังจากนี้ = ออเดอร์ใหม่)
     opened_by      INT           REFERENCES users(id),
     closed_by      INT           REFERENCES users(id),
     opened_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
@@ -158,6 +160,7 @@ CREATE TABLE order_items (
     note         TEXT,
     status       order_item_status NOT NULL DEFAULT 'ORDERED',
     round_no     SMALLINT          NOT NULL DEFAULT 1,
+    by_customer  BOOLEAN           NOT NULL DEFAULT FALSE,  -- ลูกค้าสั่งเองผ่านมือถือ
     created_at   TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_order_items_order ON order_items (order_id);
@@ -236,9 +239,14 @@ SELECT t.id,
        o.order_no,
        o.guest_count,
        o.opened_at,
+       o.billing_at,
        COALESCE(o.grand_total, 0) AS current_total,
        COALESCE((SELECT SUM(oi.qty) FROM order_items oi
-                  WHERE oi.order_id = o.id AND oi.status <> 'CANCELLED'), 0) AS item_count
+                  WHERE oi.order_id = o.id AND oi.status <> 'CANCELLED'), 0) AS item_count,
+       -- รายการที่ลูกค้าสั่งเองหลังพนักงานเปิดดูบิลครั้งล่าสุด (แจ้งเตือนออเดอร์ใหม่)
+       COALESCE((SELECT COUNT(*) FROM order_items oi
+                  WHERE oi.order_id = o.id AND oi.status <> 'CANCELLED' AND oi.by_customer
+                    AND oi.created_at > COALESCE(o.staff_seen_at, '-infinity')), 0)::int AS new_items
 FROM dining_tables t
 LEFT JOIN orders o
        ON o.table_id = t.id AND o.status IN ('OPEN', 'BILLING');

@@ -2,7 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { TopBar } from '../components/Layout';
-import { Modal, useToast, Spinner, Empty } from '../components/ui';
+import { Modal, useToast, useConfirm, Spinner, Sk, SkeletonCards, Empty } from '../components/ui';
+import StickyCatTabs from '../components/StickyCatTabs';
+import MenuThumb from '../components/MenuThumb';
 import CustomerQrModal from '../components/CustomerQrModal';
 import { baht, qty as fmtQty, since, TABLE_STATUS } from '../lib/format';
 
@@ -10,6 +12,7 @@ export default function OrderScreen() {
   const { id } = useParams();
   const nav = useNavigate();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [order, setOrder] = useState(null);
   const [menu, setMenu] = useState([]);
@@ -17,6 +20,7 @@ export default function OrderScreen() {
   const [cat, setCat] = useState('ALL');
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState({});          // { menu_item_id: qty } รายการที่ยังไม่ส่งครัว
+  const [notes, setNotes] = useState({});        // { menu_item_id: "ไม่ใส่พริก" }
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [discountOpen, setDiscountOpen] = useState(false);
@@ -26,6 +30,8 @@ export default function OrderScreen() {
 
   async function loadOrder() {
     const r = await api.get(`/orders/${id}`);
+    // เปิดดูบิลแล้ว -> ป้าย "ออเดอร์ใหม่" ของโต๊ะนี้บนผังร้านหายไป
+    api.post(`/orders/${id}/seen`).catch(() => {});
     setOrder(r.data);
     setDiscount(Number(r.data.discount));
     return r.data;
@@ -67,6 +73,12 @@ export default function OrderScreen() {
       else next[mid] = q;
       return next;
     });
+  const setNote = (mid, text) =>
+    setNotes((n) => {
+      const next = { ...n };
+      if (text) next[mid] = text; else delete next[mid];
+      return next;
+    });
 
   /** ส่งรายการในตะกร้าเข้าบิล — ระบบหลังบ้านจะตัดสต็อกตาม BOM ทันที */
   async function sendToKitchen() {
@@ -74,10 +86,11 @@ export default function OrderScreen() {
     setBusy(true);
     try {
       const r = await api.post(`/orders/${id}/items`, {
-        items: cartLines.map((l) => ({ menu_item_id: l.item.id, qty: l.qty })),
+        items: cartLines.map((l) => ({ menu_item_id: l.item.id, qty: l.qty, note: notes[l.item.id]?.trim() || undefined })),
       });
       setOrder(r.order);
       setCart({});
+      setNotes({});
       setAlerts(r.stock_alerts || []);
       toast(`บันทึก ${cartLines.length} รายการ · ตัดสต็อกเรียบร้อย`, 'ok');
       loadMenu();
@@ -122,7 +135,13 @@ export default function OrderScreen() {
   }
 
   async function voidBill() {
-    if (!confirm(`ยกเลิกบิล ${order.order_no} ทั้งใบ? วัตถุดิบทุกรายการจะถูกคืนเข้าคลัง`)) return;
+    if (!(await confirm({
+      title: `ยกเลิกบิลโต๊ะ ${order.table_no} ทั้งใบ?`,
+      message: `บิล ${order.order_no}\nวัตถุดิบทุกรายการจะถูกคืนเข้าคลัง และย้อนกลับไม่ได้`,
+      confirmLabel: 'ยกเลิกบิล',
+      cancelLabel: 'ไม่ยกเลิก',
+      danger: true,
+    }))) return;
     setBusy(true);
     try {
       await api.post(`/orders/${id}/void`, { reason: 'ยกเลิกโดยพนักงานหน้าร้าน' });
@@ -134,7 +153,21 @@ export default function OrderScreen() {
     }
   }
 
-  if (loading) return <><TopBar title="สั่งอาหาร" /><Spinner /></>;
+  if (loading) {
+    return (
+      <>
+        <TopBar title="สั่งอาหาร" />
+        <div className="order-layout">
+          <div className="order-left stack">
+            <Sk w={260} h={36} r={7} />
+            <div className="row">{[64, 80, 110, 84, 70].map((w, i) => <Sk key={i} w={w} h={32} r={16} />)}</div>
+            <SkeletonCards kind="menu" count={8} className="staff-sk" label="กำลังโหลดเมนู…" />
+          </div>
+          <aside className="order-right"><Spinner lines={6} /></aside>
+        </div>
+      </>
+    );
+  }
   if (!order) return <><TopBar title="สั่งอาหาร" /><Empty icon="⚠️">ไม่พบบิลนี้</Empty></>;
 
   const liveItems = order.items.filter((i) => i.status !== 'CANCELLED');
@@ -176,14 +209,7 @@ export default function OrderScreen() {
               value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
 
-          <div className="cat-tabs">
-            <button className={`cat-tab${cat === 'ALL' ? ' active' : ''}`} onClick={() => setCat('ALL')}>ทั้งหมด</button>
-            {categories.map((c) => (
-              <button key={c.id} className={`cat-tab${cat === c.code ? ' active' : ''}`} onClick={() => setCat(c.code)}>
-                {c.name_th}
-              </button>
-            ))}
-          </div>
+          <StickyCatTabs categories={categories} cat={cat} onChange={setCat} />
 
           {isClosed ? (
             <Empty icon="🧾">บิลนี้ปิดแล้ว ไม่สามารถสั่งเพิ่มได้</Empty>
@@ -192,7 +218,8 @@ export default function OrderScreen() {
               {shownMenu.map((m) => {
                 const out = m.max_servable !== null && m.max_servable <= 0;
                 return (
-                  <button key={m.id} className="menu-card" onClick={() => addToCart(m)} disabled={out}>
+                  <button key={m.id} className="menu-card staff-card" onClick={() => addToCart(m)} disabled={out}>
+                    <MenuThumb item={m} />
                     <div className="menu-name">{m.name_th}</div>
                     {m.description && <div className="menu-desc">{m.description}</div>}
                     <div className="menu-foot">
@@ -230,6 +257,9 @@ export default function OrderScreen() {
                     <div className="line-main">
                       <div className="line-name">{l.item.name_th}</div>
                       <div className="line-meta">{baht(l.item.price)} × {l.qty}</div>
+                      <input className="input input-sm note-input" maxLength={100}
+                        placeholder="หมายเหตุ เช่น ไม่ใส่พริก"
+                        value={notes[l.item.id] || ''} onChange={(e) => setNote(l.item.id, e.target.value)} />
                     </div>
                     <div className="qty-box">
                       <button className="qty-btn" onClick={() => setCartQty(l.item.id, l.qty - 1)}>−</button>
@@ -262,7 +292,8 @@ export default function OrderScreen() {
                         <div className="line-name">{it.name_th}</div>
                         <div className="line-meta">
                           {baht(it.unit_price)} × {fmtQty(it.qty)}
-                          {it.note && ` · ${it.note}`}
+                          {it.note && <span className="item-note"> · 📝 {it.note}</span>}
+                          {it.status === 'SERVED' && <span className="served-tag"> · ✓ เสิร์ฟแล้ว</span>}
                         </div>
                       </div>
                       {!isClosed && (

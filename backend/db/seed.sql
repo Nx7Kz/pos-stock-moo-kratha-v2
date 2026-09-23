@@ -186,3 +186,13 @@ JOIN ingredients i ON i.sku = v.ing_sku
 ON CONFLICT (menu_item_id, ingredient_id) DO NOTHING;
 
 COMMIT;
+
+-- --------------------------------------------------- รูปตัวอย่างของเมนู
+-- ไฟล์อยู่ที่ backend/media/samples (เครดิตผู้สร้างรูปดูที่ CREDITS.md ในโฟลเดอร์เดียวกัน)
+-- ร้านอัปโหลดรูปจริงแทนได้ที่หน้า "จัดการเมนู"
+UPDATE menu_items m SET image_url = '/media/samples/' || lower(m.sku) || '.jpg'
+ WHERE m.image_url IS NULL
+   AND m.sku IN ('MN-B01','MN-B02','MN-B03','MN-B04','MN-B05','MN-B06','MN-B07','MN-B08','MN-B09',
+                 'MN-B10','MN-B11','MN-B12','MN-B13','MN-B14','MN-B15','MN-B16','MN-B17',
+                 'MN-S01','MN-S02','MN-S03','MN-S04','MN-S05',
+                 'MN-D01','MN-D02','MN-D03','MN-D04','MN-D05','MN-D06','MN-D07','MN-I01','MN-I02');

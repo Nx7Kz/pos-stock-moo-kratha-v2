@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
+import { applyMovement } from '../services/stockService.js';
 import { AppError, wrap } from '../utils.js';
 import { authRequired, requireRole } from '../middleware/auth.js';
 
@@ -55,13 +56,31 @@ router.get('/:id', authRequired, wrap(async (req, res) => {
 router.post('/', authRequired, requireRole('OWNER'), wrap(async (req, res) => {
   const { sku, name_th, grp = 'OTHER', unit, qty_on_hand = 0, min_qty = 0, cost_per_unit = 0 } = req.body || {};
   if (!sku || !name_th || !unit) throw new AppError(400, 'ต้องระบุ sku, name_th และ unit');
+  const opening = Number(qty_on_hand);
+  if (!Number.isFinite(opening) || opening < 0) throw new AppError(400, 'ยอดตั้งต้นต้องเป็นตัวเลข 0 ขึ้นไป');
 
-  const { rows } = await query(
-    `INSERT INTO ingredients (sku, name_th, grp, unit, qty_on_hand, min_qty, cost_per_unit)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [sku, name_th, grp, unit, qty_on_hand, min_qty, cost_per_unit]
-  );
-  res.status(201).json({ ok: true, data: rows[0] });
+  // สร้างด้วยยอด 0 แล้วลงยอดตั้งต้นผ่าน ledger ในทรานแซกชันเดียวกัน
+  // ทุกการเปลี่ยนยอดต้องมีบรรทัดใน stock_movements (ตรวจย้อนหลังได้ว่ายอดมาจากไหน)
+  const data = await withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `INSERT INTO ingredients (sku, name_th, grp, unit, qty_on_hand, min_qty, cost_per_unit)
+       VALUES ($1,$2,$3,$4,0,$5,$6) RETURNING *`,
+      [sku, name_th, grp, unit, min_qty, cost_per_unit]
+    );
+    if (opening > 0) {
+      await applyMovement(client, {
+        ingredientId: rows[0].id,
+        movementType: 'ADJUST',
+        qtyChange: opening,
+        refType: 'MANUAL',
+        note: 'ยอดตั้งต้นตอนเพิ่มวัตถุดิบใหม่',
+        userId: req.user.id,
+      });
+    }
+    const { rows: out } = await client.query('SELECT * FROM ingredients WHERE id = $1', [rows[0].id]);
+    return out[0];
+  });
+  res.status(201).json({ ok: true, data });
 }));
 
 /**

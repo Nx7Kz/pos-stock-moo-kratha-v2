@@ -171,6 +171,11 @@ export default function OrderScreen() {
   if (!order) return <><TopBar title="สั่งอาหาร" /><Empty icon="⚠️">ไม่พบบิลนี้</Empty></>;
 
   const liveItems = order.items.filter((i) => i.status !== 'CANCELLED');
+  // ส่วนลดต้องเป็นตัวเลข 0 ถึงยอดรวม (หลังบ้านตรวจซ้ำอีกชั้น)
+  const discountError = String(discount).trim() === '' || !Number.isFinite(Number(discount)) ? 'กรอกส่วนลดเป็นตัวเลข'
+    : Number(discount) < 0 ? 'ส่วนลดต้องไม่ติดลบ'
+    : Number(discount) > Number(order.subtotal) ? `ส่วนลดเกินยอดรวม — ใส่ได้สูงสุด ${baht(order.subtotal)} บาท`
+    : '';
   const isClosed = order.status === 'PAID' || order.status === 'VOID';
   const st = TABLE_STATUS[order.status === 'BILLING' ? 'BILLING' : 'OCCUPIED'];
 
@@ -325,12 +330,21 @@ export default function OrderScreen() {
               <div className="sum-row"><span>ภาษีมูลค่าเพิ่ม</span><span>{baht(order.vat_amount)}</span></div>
             )}
             <div className="sum-row total"><span>ยอดสุทธิ</span><span>{baht(order.grand_total)} ฿</span></div>
+            {!isClosed && Number(order.paid_amount) > 0 && (
+              <>
+                <div className="sum-row"><span>รับชำระแล้ว</span><span>−{baht(order.paid_amount)}</span></div>
+                <div className="sum-row bold"><span>คงเหลือ</span><span>{baht(order.outstanding)} ฿</span></div>
+              </>
+            )}
 
             {!isClosed && (
               <div className="stack-sm mt">
                 <div className="row">
                   <button className="btn grow" onClick={() => setDiscountOpen(true)} disabled={busy}>ส่วนลด</button>
-                  <button className="btn btn-danger grow" onClick={voidBill} disabled={busy}>ยกเลิกบิล</button>
+                  <button className="btn btn-danger grow" onClick={voidBill} disabled={busy || Number(order.paid_amount) > 0}
+                    title={Number(order.paid_amount) > 0 ? `รับชำระไปแล้ว ${baht(order.paid_amount)} บาท ยกเลิกทั้งบิลไม่ได้ ให้ยกเลิกเฉพาะรายการที่ไม่ได้ทาน` : undefined}>
+                    ยกเลิกบิล
+                  </button>
                 </div>
                 <button className="btn btn-primary btn-block btn-lg" disabled={busy || !liveItems.length}
                   onClick={() => nav(`/payment/${order.id}`)}>
@@ -355,22 +369,23 @@ export default function OrderScreen() {
           footer={
             <>
               <button className="btn" onClick={() => setDiscountOpen(false)}>ยกเลิก</button>
-              <button className="btn btn-primary" onClick={saveDiscount} disabled={busy}>บันทึก</button>
+              <button className="btn btn-primary" onClick={saveDiscount} disabled={busy || !!discountError}>บันทึก</button>
             </>
           }
         >
           <div className="stack">
             <div className="field">
               <label>จำนวนเงินส่วนลด (บาท)</label>
-              <input className="input" type="number" min="0" step="1" value={discount}
+              <input className="input" type="number" min="0" max={Number(order.subtotal)} step="1" value={discount}
                 onChange={(e) => setDiscount(e.target.value)} autoFocus />
+              {discountError && <div className="tiny" style={{ color: 'var(--danger)' }}>{discountError}</div>}
             </div>
             <div className="row wrap">
-              {[0, 20, 50, 100].map((v) => (
+              {[0, 20, 50, 100].filter((v) => v <= Number(order.subtotal)).map((v) => (
                 <button key={v} className="btn btn-sm" onClick={() => setDiscount(v)}>{v === 0 ? 'ไม่ลด' : `${v} ฿`}</button>
               ))}
             </div>
-            <div className="muted small">ยอดก่อนลด {baht(order.subtotal)} บาท</div>
+            <div className="muted small">ยอดก่อนลด {baht(order.subtotal)} บาท · ลดได้สูงสุด {baht(order.subtotal)} บาท</div>
           </div>
         </Modal>
       )}

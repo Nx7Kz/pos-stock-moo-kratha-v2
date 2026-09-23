@@ -6,7 +6,8 @@ import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 
-import { pool, query } from './db.js';
+import { pool, query, withTransaction } from './db.js';
+import { validateSettings } from './settings.js';
 import { wrap } from './utils.js';
 import { MEDIA_DIR, syncUploadedImages } from './media.js';
 import { notFound, errorHandler } from './middleware/error.js';
@@ -51,14 +52,17 @@ app.get('/api/settings', authRequired, wrap(async (_req, res) => {
 
 /** PATCH /api/settings — แก้ค่าตั้งค่าร้าน (เจ้าของร้านเท่านั้น) */
 app.patch('/api/settings', authRequired, requireRole('OWNER'), wrap(async (req, res) => {
-  const entries = Object.entries(req.body || {});
-  for (const [key, value] of entries) {
-    await query(
-      `INSERT INTO settings (key, value) VALUES ($1,$2)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      [key, String(value)]
-    );
-  }
+  // ตรวจทุกค่าก่อน (ผิดข้อเดียวไม่บันทึกเลย) แล้วบันทึกพร้อมกันในทรานแซกชันเดียว
+  const entries = validateSettings(req.body);
+  await withTransaction(async (client) => {
+    for (const [key, value] of entries) {
+      await client.query(
+        `INSERT INTO settings (key, value) VALUES ($1,$2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [key, value]
+      );
+    }
+  });
   const { rows } = await query('SELECT key, value FROM settings ORDER BY key');
   res.json({ ok: true, updated: entries.length, data: Object.fromEntries(rows.map((r) => [r.key, r.value])) });
 }));

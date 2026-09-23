@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react';
 import { api, auth } from '../lib/api';
 import { TopBar } from '../components/Layout';
 import { Modal, useToast, SkeletonTable, Empty } from '../components/ui';
-import { baht, qty as fmtQty, dateTime, STOCK_STATUS, GROUP_LABEL } from '../lib/format';
+import { baht, qty as fmtQty, dateTime, todayISO, STOCK_STATUS, GROUP_LABEL } from '../lib/format';
 
 const MOVE_LABEL = { IN: 'รับเข้า', ISSUE: 'เบิกใช้', SALE: 'ตัดจากการขาย', RETURN: 'คืนสต็อก', ADJUST: 'ปรับยอด' };
 
 export default function StockPage() {
+  // ช่วงวันที่สำหรับส่งออกประวัติการเคลื่อนไหว (ค่าเริ่มต้น: ต้นเดือนนี้ -> วันนี้)
+  const [expFrom, setExpFrom] = useState(() => `${todayISO().slice(0, 7)}-01`);
+  const [expTo, setExpTo] = useState(todayISO);
   const toast = useToast();
   const isOwner = auth.user?.role === 'OWNER';
 
@@ -126,10 +129,18 @@ export default function StockPage() {
             <div className="card-head">
               <h2>ประวัติการเคลื่อนไหววัตถุดิบ</h2>
               <span className="sub">{moves.length} รายการล่าสุด</span>
-              <button className="btn btn-sm" style={{ marginLeft: 'auto' }}
-                onClick={() => api.downloadCsv('/reports/stock-movements?from=2026-01-01&to=2026-12-31', 'การเคลื่อนไหววัตถุดิบ')}>
-                ส่งออก Excel
-              </button>
+              <div className="row wrap" style={{ marginLeft: 'auto', gap: 6 }}>
+                <input className="input input-sm" style={{ width: 142 }} type="date" value={expFrom} max={expTo}
+                  onChange={(e) => setExpFrom(e.target.value)} aria-label="ส่งออกตั้งแต่วันที่" />
+                <span className="small muted">ถึง</span>
+                <input className="input input-sm" style={{ width: 142 }} type="date" value={expTo} min={expFrom}
+                  onChange={(e) => setExpTo(e.target.value)} aria-label="ส่งออกถึงวันที่" />
+                <button className="btn btn-sm" disabled={!expFrom || !expTo || expFrom > expTo}
+                  onClick={() => api.downloadCsv(`/reports/stock-movements?from=${expFrom}&to=${expTo}`,
+                    `การเคลื่อนไหววัตถุดิบ ${expFrom} ถึง ${expTo}`)}>
+                  ส่งออก Excel
+                </button>
+              </div>
             </div>
             <div className="tbl-wrap">
               <table className="tbl">
@@ -283,9 +294,12 @@ function AdjustModal({ row, onClose, onDone }) {
   const [counted, setCounted] = useState(String(row.qty_on_hand));
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
-  const diff = (Number(counted) || 0) - Number(row.qty_on_hand);
+  // ช่องว่าง / ไม่ใช่ตัวเลข / ติดลบ = ยังบันทึกไม่ได้ (เดิมช่องว่างถูกนับเป็น 0 แล้วล้างสต็อกทิ้ง)
+  const valid = counted.trim() !== '' && Number.isFinite(Number(counted)) && Number(counted) >= 0;
+  const diff = valid ? Number(counted) - Number(row.qty_on_hand) : 0;
 
   async function save() {
+    if (!valid) return toast('กรอกยอดที่นับได้จริงเป็นตัวเลข (0 ขึ้นไป)', 'err');
     setBusy(true);
     try {
       const r = await api.post('/stock/adjust', { ingredient_id: row.id, counted_qty: Number(counted), note });
@@ -304,7 +318,7 @@ function AdjustModal({ row, onClose, onDone }) {
       footer={
         <>
           <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={save} disabled={busy}>บันทึกการปรับยอด</button>
+          <button className="btn btn-primary" onClick={save} disabled={busy || !valid}>บันทึกการปรับยอด</button>
         </>
       }
     >
@@ -317,6 +331,7 @@ function AdjustModal({ row, onClose, onDone }) {
           <label>ยอดที่นับได้จริง ({row.unit})</label>
           <input className="input" type="number" min="0" step="0.001" value={counted}
             onChange={(e) => setCounted(e.target.value)} autoFocus />
+          {!valid && <div className="tiny" style={{ color: 'var(--danger)' }}>กรอกยอดที่นับได้จริงเป็นตัวเลข 0 ขึ้นไป (ถ้าหมดจริงให้ใส่ 0)</div>}
         </div>
         {diff !== 0 && (
           <div className={`alert ${diff > 0 ? 'alert-info' : 'alert-warn'}`}>

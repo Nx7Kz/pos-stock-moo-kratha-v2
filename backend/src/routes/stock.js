@@ -99,12 +99,22 @@ router.post('/issue', authRequired, wrap(async (req, res) => {
  */
 router.post('/adjust', authRequired, requireRole('OWNER'), wrap(async (req, res) => {
   const { ingredient_id, ingredient_sku, counted_qty, note } = req.body || {};
-  if (counted_qty === undefined) throw new AppError(400, 'ต้องระบุ counted_qty (ยอดที่นับได้จริง)');
-  if (Number(counted_qty) < 0) throw new AppError(400, 'ยอดที่นับได้ต้องไม่ติดลบ');
+  // ต้องเป็นตัวเลขจริง ๆ: ค่าว่าง / null / ตัวอักษร ห้ามถูกตีความเป็น 0 (ไม่อย่างนั้นสต็อกจะถูกล้างทิ้ง)
+  const raw = typeof counted_qty === 'string' ? counted_qty.trim() : counted_qty;
+  if (raw === undefined || raw === null || raw === '' || !['number', 'string'].includes(typeof raw)
+      || !Number.isFinite(Number(raw))) {
+    throw new AppError(400, 'ต้องระบุ counted_qty เป็นตัวเลข (ยอดที่นับได้จริง)');
+  }
+  if (Number(raw) < 0) throw new AppError(400, 'ยอดที่นับได้ต้องไม่ติดลบ');
+  const countedQty = Number(raw);
 
   const data = await withTransaction(async (client) => {
-    const ing = await resolveIngredient(client, { ingredient_id, ingredient_sku });
-    const diff = Number(counted_qty) - Number(ing.qty_on_hand);
+    const found = await resolveIngredient(client, { ingredient_id, ingredient_sku });
+    // ล็อกแถวก่อนอ่านยอด: ถ้ามีโต๊ะสั่งอาหาร (ตัดสต็อก) ในจังหวะเดียวกัน จะรอกันแทนที่จะคำนวณจากยอดเก่า
+    // ทำให้ยอดหลังปรับเท่ากับที่นับได้จริงเสมอ
+    const { rows: locked } = await client.query('SELECT * FROM ingredients WHERE id = $1 FOR UPDATE', [found.id]);
+    const ing = locked[0];
+    const diff = countedQty - Number(ing.qty_on_hand);
     if (diff === 0) return { message: 'ยอดตรงกับระบบอยู่แล้ว ไม่มีการปรับ', ...ing };
 
     return applyMovement(client, {
@@ -112,7 +122,7 @@ router.post('/adjust', authRequired, requireRole('OWNER'), wrap(async (req, res)
       movementType: 'ADJUST',
       qtyChange: diff,
       refType: 'MANUAL',
-      note: note || `ปรับยอดจากการนับสต็อก (ระบบ ${ing.qty_on_hand} -> นับได้ ${counted_qty})`,
+      note: note || `ปรับยอดจากการนับสต็อก (ระบบ ${ing.qty_on_hand} -> นับได้ ${countedQty})`,
       userId: req.user.id,
       allowNegative: true,
     });

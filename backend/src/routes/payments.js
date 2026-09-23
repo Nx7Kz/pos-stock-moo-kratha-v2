@@ -31,6 +31,16 @@ router.post('/', authRequired, wrap(async (req, res) => {
       throw new AppError(409, 'บิลนี้ยังไม่มีรายการอาหาร ไม่สามารถชำระเงินได้');
     }
 
+    // เคยรับเงินบางส่วนไว้ แล้วยอดบิลลดลงจนเท่ากับเงินที่รับไว้พอดี -> ปิดบิลได้เลย ไม่ต้องรับเงินเพิ่ม
+    if (full.paid_amount > 0 && full.outstanding <= 0.001 && !(Number(amount) > 0)) {
+      await client.query(
+        `UPDATE orders SET status = 'PAID', closed_at = now(), closed_by = $2 WHERE id = $1`,
+        [order.id, req.user.id]
+      );
+      await syncTableStatus(client, order.table_id);
+      return { payment: null, order: await getOrderFull(client, order.id) };
+    }
+
     const payAmount = money(amount ?? full.outstanding);
     if (payAmount <= 0) throw new AppError(400, 'ยอดชำระต้องมากกว่า 0');
     if (payAmount > full.outstanding + 0.001) {
@@ -104,7 +114,8 @@ router.get('/qr/:orderId', authRequired, wrap(async (req, res) => {
   const data = await withTransaction(async (client) => {
     const settings = await getSettings(client);
     const order = await getOrderFull(client, req.params.orderId);
-    const amount = order.outstanding || order.grand_total;
+    // ยังไม่เคยรับเงิน = ยอดเต็ม, เคยรับบางส่วนแล้ว = ยอดคงเหลือ
+    const amount = order.paid_amount > 0 ? order.outstanding : order.grand_total;
     return {
       order_no: order.order_no,
       table_no: order.table_no,

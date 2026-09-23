@@ -251,6 +251,18 @@ check('ปรับยอดจากการนับ -> 200', x.status === 20
 check('ยอดหลังปรับ = 2', x.json.data.balance_after === 2, x.json.data?.balance_after);
 check('แจ้งว่าต่ำกว่าขั้นต่ำ', x.json.data.is_low === true, x.json.data);
 
+// ค่าว่าง / null / ตัวอักษร ต้องถูกปฏิเสธ ไม่ใช่ถูกนับเป็น 0 แล้วล้างสต็อกทิ้ง
+for (const bad of ['', '   ', null, 'abc', true]) {
+  x = await call('POST', '/stock/adjust', { ingredient_sku: 'ING-V06', counted_qty: bad });
+  check(`ปรับยอดด้วย ${JSON.stringify(bad)} -> 400`, x.status === 400, { status: x.status, err: x.json.error });
+}
+x = await call('GET', '/ingredients');
+check('ยอด ING-V06 ยังเป็น 2 (ไม่ถูกล้างเป็น 0)', x.json.data.find((i) => i.sku === 'ING-V06').qty_on_hand === 2,
+  x.json.data.find((i) => i.sku === 'ING-V06')?.qty_on_hand);
+x = await call('POST', '/stock/adjust', { ingredient_sku: 'ING-V06', counted_qty: '2.5' });
+check('ตัวเลขที่ส่งมาเป็นข้อความ "2.5" ยังใช้ได้', x.status === 200 && x.json.data.balance_after === 2.5, x.json);
+x = await call('POST', '/stock/adjust', { ingredient_sku: 'ING-V06', counted_qty: 2 });
+
 console.log('\n=== 11. แจ้งเตือนวัตถุดิบใกล้หมด ===');
 x = await call('GET', '/stock/low');
 check('GET /stock/low ทำงาน', x.status === 200, x.json);
@@ -326,6 +338,149 @@ check('คืนน้ำดื่มครบ 5 ขวด', x.json.data.find((i
 x = await call('GET', '/tables');
 check('โต๊ะ T20 กลับมาว่าง', x.json.data.find((t) => t.table_no === 'T20').status === 'FREE');
 
+console.log('\n=== 15.1 รับเงินบางส่วนแล้วลดยอด ต้องไม่ทำให้บิลค้าง ===');
+x = await call('POST', '/orders', { table_no: 'T15', items: [{ menu_sku: 'MN-B02', qty: 1 }, { menu_sku: 'MN-D02', qty: 4 }] });
+const partId = x.json.order.id;
+const setItem = x.json.order.items.find((i) => i.sku === 'MN-B02');
+check('เปิดบิล T15 ยอด 649', r(x.json.order.grand_total) === 649, x.json.order?.grand_total);
+x = await call('POST', '/payments', { order_id: partId, method: 'CASH', amount: 300 });
+check('รับเงินบางส่วน 300 -> คงเหลือ 349', x.status === 201 && r(x.json.order.outstanding) === 349, x.json);
+x = await call('POST', `/orders/${partId}/void`, { reason: 'ลองยกเลิก' });
+check('ยกเลิกทั้งบิลหลังรับเงินแล้ว -> 409', x.status === 409 && x.json.details?.reason === 'HAS_PAYMENTS', x.json);
+x = await call('GET', `/orders/${partId}`);
+check('บิลยังเปิดอยู่ ไม่ถูกยกเลิก', x.json.data.status !== 'VOID', x.json.data?.status);
+x = await call('PATCH', `/orders/${partId}`, { discount: 400 });
+check('ส่วนลดจนยอดต่ำกว่าที่รับไว้ -> 409', x.status === 409 && x.json.details?.reason === 'BELOW_PAID', x.json);
+x = await call('DELETE', `/orders/${partId}/items/${setItem.id}`);
+check('ยกเลิกรายการจนยอดต่ำกว่าที่รับไว้ -> 409', x.status === 409, x.json);
+x = await call('GET', `/orders/${partId}`);
+check('ถูกปฏิเสธแล้วบิลไม่เปลี่ยน (ยอด 649 ส่วนลด 0 รายการยังอยู่)',
+  r(x.json.data.grand_total) === 649 && Number(x.json.data.discount) === 0
+  && x.json.data.items.find((i) => i.id === setItem.id).status !== 'CANCELLED', x.json.data);
+x = await call('PATCH', `/orders/${partId}`, { discount: 349 });
+check('ส่วนลดให้ยอดเท่ากับที่รับไว้พอดี -> ได้ (คงเหลือ 0)', x.status === 200 && r(x.json.data.outstanding) === 0, x.json);
+x = await call('POST', '/payments', { order_id: partId, method: 'CASH' });
+check('ปิดบิลได้โดยไม่ต้องรับเงินเพิ่ม -> PAID', x.status === 201 && x.json.order.status === 'PAID' && x.json.payment === null, x.json);
+check('ไม่มีรายการรับเงินเพิ่ม (ยังเป็น 1 รายการ 300)', x.json.order.payments.length === 1 && r(x.json.order.paid_amount) === 300, x.json.order?.payments);
+x = await call('GET', '/tables');
+check('โต๊ะ T15 กลับมาว่าง', x.json.data.find((t) => t.table_no === 'T15').status === 'FREE');
+
+console.log('\n=== 15.2 ปิดบัญชี / เปลี่ยนสิทธิ์ / เปลี่ยนรหัสผ่าน ต้องมีผลทันที ===');
+x = await call('POST', '/auth/users', { username: 'temp1', password: 'temp1234', full_name: 'พนักงานชั่วคราว', role: 'STAFF' });
+const tempId = x.json.data.id;
+x = await call('POST', '/auth/login', { username: 'temp1', password: 'temp1234' }, { noAuth: true });
+const tempToken = x.json.token;
+const asTemp = (m, p, b) => call(m, p, b, { noAuth: true, headers: { Authorization: `Bearer ${tempToken}` } });
+x = await asTemp('GET', '/tables');
+check('ผู้ใช้ใหม่เข้าใช้งานได้', x.status === 200, x.status);
+x = await asTemp('GET', '/auth/users');
+check('พนักงานดูรายชื่อผู้ใช้ไม่ได้ -> 403', x.status === 403, x.status);
+
+await call('PATCH', `/auth/users/${tempId}`, { role: 'OWNER' });
+x = await asTemp('GET', '/auth/users');
+check('เลื่อนเป็นเจ้าของร้าน -> token เดิมใช้สิทธิ์ใหม่ได้ทันที', x.status === 200, x.status);
+await call('PATCH', `/auth/users/${tempId}`, { role: 'STAFF' });
+x = await asTemp('GET', '/auth/users');
+check('ลดสิทธิ์กลับเป็นพนักงาน -> 403 ทันที', x.status === 403, x.status);
+
+await call('PATCH', `/auth/users/${tempId}`, { is_active: false });
+x = await asTemp('GET', '/tables');
+check('ปิดบัญชี -> token เดิมโดน 401 ทันที', x.status === 401, x.status);
+x = await call('POST', '/auth/login', { username: 'temp1', password: 'temp1234' }, { noAuth: true });
+check('ปิดบัญชีแล้วเข้าสู่ระบบไม่ได้', x.status === 401, x.status);
+await call('PATCH', `/auth/users/${tempId}`, { is_active: true });
+
+await call('PATCH', `/auth/users/${tempId}`, { password: 'newpass99' });
+x = await asTemp('GET', '/tables');
+check('เปลี่ยนรหัสผ่าน -> token เดิมโดน 401', x.status === 401, x.status);
+x = await call('POST', '/auth/login', { username: 'temp1', password: 'newpass99' }, { noAuth: true });
+check('เข้าสู่ระบบด้วยรหัสใหม่ได้', x.status === 200 && !!x.json.token, x.status);
+x = await call('GET', '/tables');
+check('token ของเจ้าของร้านยังใช้ได้ตามปกติ', x.status === 200, x.status);
+await call('PATCH', `/auth/users/${tempId}`, { is_active: false });
+
+console.log('\n=== 15.3 ตั้งค่าร้าน: ค่าผิดรูปแบบต้องไม่ถูกบันทึก ===');
+const settingsBefore = (await call('GET', '/settings')).json.data;
+for (const [body, why] of [
+  [{ vat_rate: 'abc' }, 'vat_rate เป็นตัวอักษร'],
+  [{ vat_rate: 150 }, 'vat_rate เกิน 100'],
+  [{ service_rate: -5 }, 'service_rate ติดลบ'],
+  [{ vat_included: 'yes' }, 'vat_included ไม่ใช่ true/false'],
+  [{ promptpay_id: '12345' }, 'พร้อมเพย์ไม่ครบหลัก'],
+  [{ shop_name: '   ' }, 'ชื่อร้านว่าง'],
+  [{ customer_base_url: 'ftp://x' }, 'ที่อยู่เว็บไม่ใช่ http'],
+  [{ hacker_key: '1' }, 'ค่าที่ระบบไม่รู้จัก'],
+  [{ service_rate: 10, vat_rate: 'x' }, 'ผิดข้อเดียวในหลายค่า'],
+]) {
+  x = await call('PATCH', '/settings', body);
+  check(`${why} -> 400`, x.status === 400, { status: x.status, err: x.json.error });
+}
+x = await call('GET', '/settings');
+check('ค่าผิดไม่ถูกบันทึกเลยสักค่า (ตั้งค่าเหมือนเดิม)', JSON.stringify(x.json.data) === JSON.stringify(settingsBefore), x.json.data);
+x = await call('PATCH', '/settings', { vat_rate: '7', vat_included: true, promptpay_id: '034-000-9991' });
+check('ค่าถูกต้องบันทึกได้ และจัดรูปแบบให้', x.status === 200 && x.json.data.vat_rate === '7'
+  && x.json.data.vat_included === 'true' && x.json.data.promptpay_id === '0340009991', x.json);
+await call('PATCH', '/settings', { vat_rate: settingsBefore.vat_rate, vat_included: settingsBefore.vat_included, promptpay_id: settingsBefore.promptpay_id });
+x = await call('POST', '/orders', { table_no: 'T16', items: [{ menu_sku: 'MN-D01', qty: 1 }] });
+check('หลังแก้ตั้งค่า เปิดบิลคิดยอดได้ปกติ', x.status === 201 && Number.isFinite(Number(x.json.order.grand_total)), x.json);
+await call('POST', `/orders/${x.json.order.id}/void`, { reason: 'cleanup' });
+
+console.log('\n=== 15.4 ส่วนลดต้องไม่เกินยอดรวม ===');
+x = await call('POST', '/orders', { table_no: 'T17', items: [{ menu_sku: 'MN-D02', qty: 2 }, { menu_sku: 'MN-D01', qty: 1 }] });
+const discId = x.json.order.id;
+const cokeLine = x.json.order.items.find((i) => i.sku === 'MN-D02');
+check('เปิดบิล T17 ยอด 65', r(x.json.order.subtotal) === 65, x.json.order?.subtotal);
+x = await call('PATCH', `/orders/${discId}`, { discount: 70 });
+check('ส่วนลด 70 เกินยอด 65 -> 400', x.status === 400 && x.json.details?.reason === 'DISCOUNT_TOO_HIGH' && x.json.details?.max === 65, x.json);
+x = await call('PATCH', `/orders/${discId}`, { discount: 'abc' });
+check('ส่วนลดเป็นตัวอักษร -> 400', x.status === 400, x.json);
+x = await call('PATCH', `/orders/${discId}`, { discount: 65 });
+check('ส่วนลดเท่ายอดรวมพอดีได้ (สุทธิ 0)', x.status === 200 && r(x.json.data.grand_total) === 0, x.json);
+x = await call('PATCH', `/orders/${discId}`, { discount: 60 });
+x = await call('DELETE', `/orders/${discId}/items/${cokeLine.id}`);
+check('ยกเลิกรายการจนยอดรวม (15) ต่ำกว่าส่วนลด (60) -> ส่วนลดปรับลงเหลือ 15',
+  x.status === 200 && r(x.json.data.discount) === 15 && r(x.json.data.grand_total) === 0, x.json.data);
+await call('POST', `/orders/${discId}/void`, { reason: 'cleanup' });
+
+console.log('\n=== 15.5 ปรับยอดสต็อกระหว่างมีการขาย / ยอดตั้งต้น / บันทึกสูตรพร้อมราคา ===');
+// ปรับยอดพร้อมกับมีโต๊ะสั่งโค้ก (ตัดสต็อก ING-D02) -> ยอดหลังปรับต้องเท่ากับที่นับได้พอดีทุกครั้ง
+x = await call('POST', '/orders', { table_no: 'T16' });
+const raceOrderId = x.json.order.id;
+let adjustExact = true;
+for (let i = 0; i < 5; i++) {
+  const [adj] = await Promise.all([
+    call('POST', '/stock/adjust', { ingredient_sku: 'ING-D02', counted_qty: 50 }),
+    call('POST', `/orders/${raceOrderId}/items`, { items: [{ menu_sku: 'MN-D02', qty: 1 }] }),
+  ]);
+  if (adj.status !== 200 || (adj.json.data.balance_after !== undefined && adj.json.data.balance_after !== 50)) adjustExact = false;
+}
+check('ปรับยอดพร้อมกับมีการขาย 5 รอบ -> ยอดหลังปรับ = 50 ทุกครั้ง', adjustExact);
+await call('POST', `/orders/${raceOrderId}/void`, { reason: 'cleanup' });
+
+x = await call('POST', '/ingredients', { sku: 'ING-TEST1', name_th: 'วัตถุดิบทดสอบ', unit: 'กก.', qty_on_hand: 5, cost_per_unit: 10 });
+check('เพิ่มวัตถุดิบใหม่ ยอดตั้งต้น 5', x.status === 201 && Number(x.json.data.qty_on_hand) === 5, x.json);
+x = await call('GET', `/ingredients/${x.json.data.id}`);
+check('ยอดตั้งต้นลงประวัติการเคลื่อนไหว (ADJUST +5)',
+  x.json.data.movements.length === 1 && x.json.data.movements[0].movement_type === 'ADJUST' && Number(x.json.data.movements[0].qty_change) === 5,
+  x.json.data.movements);
+x = await call('POST', '/ingredients', { sku: 'ING-TEST2', name_th: 'ทดสอบ', unit: 'กก.', qty_on_hand: 'abc' });
+check('ยอดตั้งต้นเป็นตัวอักษร -> 400', x.status === 400, x.json);
+
+const onion = (await call('GET', '/menu?q=หอมใหญ่')).json.data[0];
+const onionFull = (await call('GET', `/menu/${onion.id}`)).json.data;
+const onionRecipe = onionFull.recipe.map((l) => ({ ingredient_id: l.ingredient_id, qty_per_unit: Number(l.qty_per_unit) }));
+x = await call('PUT', `/menu/${onion.id}/recipe`, { price: 55, recipe: [{ ingredient_sku: 'ING-NOPE', qty_per_unit: 1 }] });
+check('สูตรผิด (วัตถุดิบไม่มีจริง) -> 404', x.status === 404, x.json);
+x = await call('GET', `/menu/${onion.id}`);
+check('สูตรผิดแล้วราคาไม่เปลี่ยน (บันทึกพร้อมกันทั้งหมดหรือไม่บันทึกเลย)',
+  Number(x.json.data.price) === Number(onionFull.price) && x.json.data.recipe.length === onionFull.recipe.length, x.json.data);
+x = await call('PUT', `/menu/${onion.id}/recipe`, { price: 'abc', recipe: onionRecipe });
+check('ราคาเป็นตัวอักษร -> 400', x.status === 400, x.json);
+x = await call('PUT', `/menu/${onion.id}/recipe`, { price: 55, is_available: true, recipe: onionRecipe });
+x = await call('GET', `/menu/${onion.id}`);
+check('บันทึกราคา + สูตรพร้อมกันได้', Number(x.json.data.price) === 55 && x.json.data.recipe.length === onionFull.recipe.length, x.json.data);
+await call('PUT', `/menu/${onion.id}/recipe`, { price: Number(onionFull.price), recipe: onionRecipe });
+
 console.log('\n=== 16. กติกาความถูกต้องของข้อมูล ===');
 x = await call('POST', '/orders', { table_no: 'T07', items: [{ menu_sku: 'MN-D01', qty: 1 }] });
 const dupTableOrder = x.json.order.id;
@@ -333,12 +488,32 @@ x = await call('POST', '/orders', { table_no: 'T07' });
 check('เปิดบิลซ้ำโต๊ะเดิม -> 409', x.status === 409, { status: x.status, err: x.json.error });
 await call('POST', `/orders/${dupTableOrder}/void`, { reason: 'cleanup' });
 
+// เปิดบิลหลายโต๊ะพร้อมกัน: เลขบิลต้องไม่ชนกัน (เดิมใช้ MAX+1 โดยไม่ล็อก ทำให้ล้มด้วย "ข้อมูลซ้ำ")
+const raceTables = ['T08', 'T09', 'T10', 'T13', 'T14'];
+const raced = await Promise.all(raceTables.map((t) => call('POST', '/orders', { table_no: t, items: [{ menu_sku: 'MN-D01', qty: 1 }] })));
+check('เปิดบิล 5 โต๊ะพร้อมกัน -> สำเร็จทั้งหมด', raced.every((o) => o.status === 201), raced.map((o) => o.json.error || o.status));
+const racedNos = raced.filter((o) => o.status === 201).map((o) => o.json.order.order_no);
+check('เลขบิลที่ได้ไม่ซ้ำกัน', new Set(racedNos).size === racedNos.length, racedNos);
+for (const o of raced) if (o.status === 201) await call('POST', `/orders/${o.json.order.id}/void`, { reason: 'cleanup' });
+
 x = await call('POST', '/orders', { table_no: 'T99' });
 check('โต๊ะไม่มีจริง -> 404', x.status === 404, x.status);
 x = await call('POST', '/orders', { guest_count: 2 });
 check('ไม่ระบุโต๊ะ -> 400', x.status === 400, x.status);
 x = await call('GET', '/orders/999999');
 check('บิลไม่มีจริง -> 404', x.status === 404, x.status);
+// error ต้องไม่เปิดเผยรายละเอียดภายใน (SQL / ชื่อตาราง / คอลัมน์) ให้หน้าเว็บ
+const leaks = (j) => /syntax|relation|column|constraint|Key \(|SELECT|postgres|at .*\.js/i.test(JSON.stringify(j));
+x = await call('GET', '/orders/abc');
+check('id ไม่ใช่ตัวเลข -> 400 ไม่เปิดเผยข้อความของฐานข้อมูล', x.status === 400 && !x.json.details && !leaks(x.json), x.json);
+x = await call('POST', '/auth/users', { username: 'owner', password: 'dup12345', full_name: 'ซ้ำ' });
+check('ชื่อผู้ใช้ซ้ำ -> 409 ไม่แนบรายละเอียดคอลัมน์', x.status === 409 && !x.json.details && !leaks(x.json), x.json);
+{
+  const res = await fetch(BASE + '/orders', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: '{bad json' });
+  const j = await res.json();
+  check('JSON เสีย -> 400 (ไม่ใช่ 500)', res.status === 400 && !leaks(j), { status: res.status, j });
+}
+
 x = await call('GET', '/nope');
 check('เส้นทางไม่มีจริง -> 404', x.status === 404, x.status);
 

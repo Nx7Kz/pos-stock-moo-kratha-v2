@@ -67,7 +67,10 @@ export default function Payment() {
     );
   }
 
-  const total = Number(order.outstanding || order.grand_total);
+  // เคยรับเงินบางส่วนแล้ว -> ต้องจ่ายแค่ยอดคงเหลือ (อาจเป็น 0 ถ้ายอดบิลลดลงจนเท่ากับที่รับไว้)
+  const paidBefore = Number(order.paid_amount || 0);
+  const total = paidBefore > 0 ? Number(order.outstanding) : Number(order.grand_total);
+  const settled = paidBefore > 0 && total <= 0;   // รับเงินครบแล้ว เหลือแค่กดปิดบิล
   const receivedNum = Number(received) || 0;
   const change = method === 'CASH' && receivedNum > 0 ? receivedNum - total : 0;
   const canPay = method !== 'CASH' || received === '' || receivedNum >= total;
@@ -127,6 +130,12 @@ export default function Payment() {
               {Number(order.discount) > 0 && <div className="sum-row"><span>ส่วนลด</span><span>−{baht(order.discount)}</span></div>}
               {Number(order.service_charge) > 0 && <div className="sum-row"><span>ค่าบริการ</span><span>{baht(order.service_charge)}</span></div>}
               {Number(order.vat_amount) > 0 && <div className="sum-row"><span>ภาษีมูลค่าเพิ่ม</span><span>{baht(order.vat_amount)}</span></div>}
+              {paidBefore > 0 && (
+                <>
+                  <div className="sum-row"><span>ยอดรวมทั้งบิล</span><span>{baht(order.grand_total)}</span></div>
+                  <div className="sum-row"><span>รับชำระแล้ว</span><span>−{baht(paidBefore)}</span></div>
+                </>
+              )}
               <div className="sum-row total"><span>ยอดที่ต้องชำระ</span><span>{baht(total)} ฿</span></div>
             </div>
           </div>
@@ -136,6 +145,12 @@ export default function Payment() {
             <div className="card">
               <div className="card-head"><h2>ช่องทางการชำระเงิน</h2></div>
               <div className="card-body stack">
+                {settled ? (
+                  <div className="alert alert-info">
+                    <span>✓</span>
+                    <div>รับเงินไว้แล้ว <strong>{baht(paidBefore)} บาท</strong> ครบตามยอดบิล ไม่ต้องรับเงินเพิ่ม กดปิดบิลได้เลย</div>
+                  </div>
+                ) : (<>
                 <div className="method-row">
                   {['CASH', 'TRANSFER', 'QR'].map((m) => (
                     <button key={m} className={`method${method === m ? ' active' : ''}`} onClick={() => setMethod(m)}>
@@ -205,8 +220,10 @@ export default function Payment() {
                   </div>
                 )}
 
-                <button className="btn btn-accent btn-block btn-lg" onClick={pay} disabled={busy || !canPay}>
-                  {busy ? 'กำลังบันทึก…' : `รับชำระ ${baht(total)} บาท`}
+                </>)}
+
+                <button className="btn btn-accent btn-block btn-lg" onClick={pay} disabled={busy || (!settled && !canPay)}>
+                  {busy ? 'กำลังบันทึก…' : settled ? 'ปิดบิล' : `รับชำระ ${baht(total)} บาท`}
                 </button>
               </div>
             </div>

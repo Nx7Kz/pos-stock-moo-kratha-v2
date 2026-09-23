@@ -20,11 +20,13 @@ export function todayCode(date = new Date()) {
 
 /**
  * สร้างเลขเอกสารรันนิ่งต่อวัน เช่น OD20260827-0001
- * ใช้ client เดียวกับทรานแซกชันเพื่อกันเลขชนกัน
+ * ต้องเรียกด้วย client ของทรานแซกชัน: ล็อก (advisory lock) ต่อชนิดเอกสาร+วัน ไว้จนทรานแซกชันจบ
+ * ถ้าไม่ล็อก สองรายการที่ทำพร้อมกันจะได้ MAX+1 เลขเดียวกัน แล้วรายการหนึ่งล้มด้วย "ข้อมูลซ้ำ"
  */
 export async function nextDocNo(client, { table, column, prefix }) {
   const code = todayCode();
   const like = `${prefix}${code}-%`;
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`docno:${prefix}${code}`]);
   const { rows } = await client.query(
     `SELECT COALESCE(MAX(SUBSTRING(${column} FROM '[0-9]{4}$')::int), 0) + 1 AS seq
        FROM ${table} WHERE ${column} LIKE $1`,

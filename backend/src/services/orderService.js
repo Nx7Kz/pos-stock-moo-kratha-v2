@@ -25,7 +25,9 @@ export async function recalcOrder(client, orderId) {
 
   const { rows: orderRows } = await client.query('SELECT discount FROM orders WHERE id = $1', [orderId]);
   if (!orderRows[0]) throw new AppError(404, `ไม่พบออเดอร์ id=${orderId}`);
-  const discount = money(orderRows[0].discount);
+  // ยอดรวมลดลงทีหลัง (ยกเลิก/ลดจำนวนรายการ) จนต่ำกว่าส่วนลดที่ใส่ไว้ -> ปรับส่วนลดลงเท่ายอดรวม
+  // ใบเสร็จจะได้ไม่แสดงส่วนลดมากกว่าค่าอาหาร
+  const discount = money(Math.min(Number(orderRows[0].discount), subtotal));
 
   const net = money(Math.max(subtotal - discount, 0));
   const serviceCharge = money(net * serviceRate);
@@ -40,12 +42,32 @@ export async function recalcOrder(client, orderId) {
 
   const { rows } = await client.query(
     `UPDATE orders
-        SET subtotal = $2, service_charge = $3, vat_amount = $4, grand_total = $5
+        SET subtotal = $2, service_charge = $3, vat_amount = $4, grand_total = $5, discount = $6
       WHERE id = $1
       RETURNING *`,
-    [orderId, subtotal, serviceCharge, vatAmount, grandTotal]
+    [orderId, subtotal, serviceCharge, vatAmount, grandTotal, discount]
   );
   return rows[0];
+}
+
+/**
+ * กันยอดบิลลดลงต่ำกว่าเงินที่รับไปแล้ว (รับเงินบางส่วน แล้วลดจำนวน / ยกเลิกรายการ / ให้ส่วนลด)
+ * ถ้าปล่อยไว้ บิลจะค้าง: ยอดคงเหลือเป็น 0 แต่สถานะยังไม่ปิด และรับเงินเพิ่มไม่ได้
+ * เรียกหลัง recalcOrder ในทรานแซกชันเดียวกัน -> throw แล้วการแก้ไขทั้งหมดถูกย้อนกลับ
+ */
+export async function assertNotBelowPaid(client, orderId) {
+  const { rows } = await client.query(
+    `SELECT o.grand_total, COALESCE((SELECT SUM(amount) FROM payments p WHERE p.order_id = o.id), 0) AS paid
+       FROM orders o WHERE o.id = $1`,
+    [orderId]
+  );
+  const paid = Number(rows[0]?.paid || 0);
+  const total = Number(rows[0]?.grand_total || 0);
+  if (paid > 0 && total < paid - 0.001) {
+    throw new AppError(409,
+      `รับชำระไปแล้ว ${money(paid)} บาท ยอดบิลใหม่ (${money(total)} บาท) ต่ำกว่าเงินที่รับไว้ไม่ได้`,
+      { reason: 'BELOW_PAID', paid: money(paid), grand_total: money(total) });
+  }
 }
 
 /** ดึงออเดอร์ 1 ใบพร้อมรายการอาหาร โต๊ะ และการชำระเงิน */

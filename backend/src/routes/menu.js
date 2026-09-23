@@ -147,14 +147,32 @@ router.delete('/:id/image', authRequired, requireRole('OWNER'), wrap(async (req,
   res.json({ ok: true, message: 'ลบรูปเมนูแล้ว', data: rows[0] });
 }));
 
-/** PUT /api/menu/:id/recipe — กำหนดสูตรอาหาร (BOM) ใหม่ทั้งชุด */
+/**
+ * PUT /api/menu/:id/recipe — กำหนดสูตรอาหาร (BOM) ใหม่ทั้งชุด
+ * body: [ ...recipe ] หรือ { recipe, price?, is_available? }
+ * ส่งราคา/สถานะขายมาพร้อมกันได้ -> บันทึกทั้งหมดในทรานแซกชันเดียว
+ * (เดิมหน้าเว็บบันทึกราคาแยกกับสูตร ถ้าสูตรบันทึกไม่ผ่าน ราคาจะเปลี่ยนไปแล้วครึ่งเดียว)
+ */
 router.put('/:id/recipe', authRequired, requireRole('OWNER'), wrap(async (req, res) => {
   const lines = req.body?.recipe ?? req.body;
   if (!Array.isArray(lines)) throw new AppError(400, 'ต้องส่ง recipe เป็น array ของ { ingredient_sku | ingredient_id, qty_per_unit }');
+  const { price, is_available } = Array.isArray(req.body) ? {} : req.body;
+  if (price !== undefined && (price === null || price === '' || !Number.isFinite(Number(price)) || Number(price) < 0)) {
+    throw new AppError(400, 'ราคาขายต้องเป็นตัวเลข 0 ขึ้นไป');
+  }
+  if (is_available !== undefined && typeof is_available !== 'boolean') {
+    throw new AppError(400, 'is_available ต้องเป็น true หรือ false');
+  }
 
   const data = await withTransaction(async (client) => {
-    const { rows } = await client.query('SELECT id FROM menu_items WHERE id = $1', [req.params.id]);
+    const { rows } = await client.query('SELECT id FROM menu_items WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!rows[0]) throw new AppError(404, 'ไม่พบเมนูที่ระบุ');
+    if (price !== undefined || is_available !== undefined) {
+      await client.query(
+        `UPDATE menu_items SET price = COALESCE($2, price), is_available = COALESCE($3, is_available) WHERE id = $1`,
+        [rows[0].id, price === undefined ? null : Number(price), is_available ?? null]
+      );
+    }
     await upsertRecipe(client, rows[0].id, lines, false);
     const { rows: out } = await client.query(
       `SELECT r.ingredient_id, r.qty_per_unit, i.sku, i.name_th, i.unit

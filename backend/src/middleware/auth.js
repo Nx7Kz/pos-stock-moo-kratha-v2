@@ -1,5 +1,7 @@
+import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { AppError } from '../utils.js';
+import { query } from '../db.js';
 
 /**
  * กุญแจสำหรับเซ็น JWT
@@ -26,25 +28,53 @@ const SECRET = (() => {
   return 'dev-only-insecure-secret';
 })();
 
+/**
+ * ลายนิ้วมือของรหัสผ่านปัจจุบัน (ไม่ใช่ตัวรหัสผ่าน) ใส่ไว้ใน token
+ * เปลี่ยนรหัสผ่านเมื่อไร token ที่ออกก่อนหน้านั้นจะใช้ไม่ได้ทันที
+ */
+const pwVersion = (passwordHash) =>
+  crypto.createHash('sha256').update(String(passwordHash)).digest('hex').slice(0, 16);
+
 export function signToken(user) {
   return jwt.sign(
-    { sub: user.id, username: user.username, role: user.role, name: user.full_name },
+    { sub: user.id, username: user.username, role: user.role, name: user.full_name, pv: pwVersion(user.password_hash) },
     SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '12h' }
   );
 }
 
-/** ต้องล็อกอินก่อนถึงจะเรียกได้ */
-export function authRequired(req, _res, next) {
+/**
+ * ต้องล็อกอินก่อนถึงจะเรียกได้
+ * ตรวจกับฐานข้อมูลทุกครั้ง (ไม่เชื่อข้อมูลใน token อย่างเดียว) ทำให้มีผลทันทีเมื่อ
+ *   - ปิดบัญชีผู้ใช้ (is_active = false)   -> 401 เด้งออกจากระบบ
+ *   - เปลี่ยนสิทธิ์ (role)                   -> ใช้สิทธิ์ใหม่ทันที
+ *   - เปลี่ยนรหัสผ่าน                        -> token เดิมใช้ไม่ได้ ต้องเข้าสู่ระบบใหม่
+ */
+export async function authRequired(req, _res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return next(new AppError(401, 'ต้องเข้าสู่ระบบก่อนใช้งาน (ไม่พบ Bearer token)'));
+
+  let payload;
   try {
-    const payload = jwt.verify(token, SECRET);
-    req.user = { id: payload.sub, username: payload.username, role: payload.role, name: payload.name };
-    next();
+    payload = jwt.verify(token, SECRET);
   } catch {
-    next(new AppError(401, 'Token ไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่'));
+    return next(new AppError(401, 'Token ไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่'));
+  }
+
+  try {
+    const { rows } = await query(
+      'SELECT id, username, full_name, role, is_active, password_hash FROM users WHERE id = $1', [payload.sub]
+    );
+    const u = rows[0];
+    if (!u || !u.is_active) return next(new AppError(401, 'บัญชีนี้ถูกปิดใช้งานแล้ว กรุณาติดต่อเจ้าของร้าน'));
+    if (payload.pv !== pwVersion(u.password_hash)) {
+      return next(new AppError(401, 'รหัสผ่านถูกเปลี่ยนแล้ว กรุณาเข้าสู่ระบบใหม่'));
+    }
+    req.user = { id: u.id, username: u.username, role: u.role, name: u.full_name };
+    next();
+  } catch (e) {
+    next(e);
   }
 }
 

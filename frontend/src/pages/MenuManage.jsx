@@ -147,10 +147,16 @@ function RecipeModal({ id, isOwner, onClose, onSaved, onImageChanged }) {
   }, 0);
 
   async function save() {
+    // ช่องราคาว่างห้ามถูกนับเป็น 0 บาท
+    if (String(price).trim() === '' || !Number.isFinite(Number(price)) || Number(price) < 0) {
+      return toast('กรอกราคาขายเป็นตัวเลข 0 ขึ้นไป', 'err');
+    }
     setBusy(true);
     try {
-      await api.patch(`/menu/${id}`, { price: Number(price), is_available: available });
+      // ราคา + สถานะขาย + สูตร ส่งไปพร้อมกัน บันทึกทั้งหมดหรือไม่บันทึกเลย (ไม่ค้างครึ่งเดียว)
       await api.put(`/menu/${id}/recipe`, {
+        price: Number(price),
+        is_available: available,
         recipe: lines
           .filter((l) => l.ingredient_id && Number(l.qty_per_unit) > 0)
           .map((l) => ({ ingredient_id: Number(l.ingredient_id), qty_per_unit: Number(l.qty_per_unit) })),

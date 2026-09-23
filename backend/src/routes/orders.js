@@ -3,7 +3,7 @@ import { query, withTransaction } from '../db.js';
 import { AppError, wrap, nextDocNo, money, accessCode } from '../utils.js';
 import { authRequired } from '../middleware/auth.js';
 import { applyRecipe, checkAvailability } from '../services/stockService.js';
-import { recalcOrder, getOrderFull, syncTableStatus } from '../services/orderService.js';
+import { recalcOrder, getOrderFull, syncTableStatus, assertNotBelowPaid } from '../services/orderService.js';
 
 const router = Router();
 
@@ -138,6 +138,7 @@ router.patch('/:id/items/:itemId', authRequired, wrap(async (req, res) => {
     }
 
     await recalcOrder(client, order.id);
+    await assertNotBelowPaid(client, order.id);
     return { order: await getOrderFull(client, order.id), stock_alerts: dedupeAlerts(alerts) };
   });
 
@@ -168,6 +169,7 @@ router.delete('/:id/items/:itemId', authRequired, wrap(async (req, res) => {
     });
     await client.query(`UPDATE order_items SET status = 'CANCELLED' WHERE id = $1`, [item.id]);
     await recalcOrder(client, order.id);
+    await assertNotBelowPaid(client, order.id);
     return getOrderFull(client, order.id);
   });
 
@@ -192,7 +194,21 @@ router.patch('/:id', authRequired, wrap(async (req, res) => {
   const { discount, guest_count, note } = req.body || {};
   const data = await withTransaction(async (client) => {
     const order = await lockOpenOrder(client, req.params.id);
-    if (discount !== undefined && Number(discount) < 0) throw new AppError(400, 'ส่วนลดต้องไม่ติดลบ');
+    if (discount !== undefined) {
+      if (discount === null || discount === '' || !Number.isFinite(Number(discount))) {
+        throw new AppError(400, 'ส่วนลดต้องเป็นตัวเลข');
+      }
+      if (Number(discount) < 0) throw new AppError(400, 'ส่วนลดต้องไม่ติดลบ');
+      // ส่วนลดเกินยอดรวมไม่ได้ (ใบเสร็จจะแสดงส่วนลดมากกว่าค่าอาหาร และรายงานส่วนลดเพี้ยน)
+      const { rows: sub } = await client.query(
+        `SELECT COALESCE(SUM(line_total), 0) AS subtotal FROM order_items WHERE order_id = $1 AND status <> 'CANCELLED'`,
+        [order.id]
+      );
+      const subtotal = money(sub[0].subtotal);
+      if (Number(discount) > subtotal + 0.001) {
+        throw new AppError(400, `ส่วนลดเกินยอดรวม — ใส่ได้สูงสุด ${subtotal} บาท`, { reason: 'DISCOUNT_TOO_HIGH', max: subtotal });
+      }
+    }
     await client.query(
       `UPDATE orders SET
          discount    = COALESCE($2, discount),
@@ -202,6 +218,7 @@ router.patch('/:id', authRequired, wrap(async (req, res) => {
       [order.id, discount ?? null, guest_count ?? null, note ?? null]
     );
     await recalcOrder(client, order.id);
+    await assertNotBelowPaid(client, order.id);
     return getOrderFull(client, order.id);
   });
   res.json({ ok: true, data });
@@ -238,6 +255,17 @@ router.post('/:id/void', authRequired, wrap(async (req, res) => {
   const reason = req.body?.reason;
   const data = await withTransaction(async (client) => {
     const order = await lockOpenOrder(client, req.params.id);
+    // รับเงินไปแล้วห้ามยกเลิกทั้งบิล: เงินจะค้างในบิลที่ยกเลิก และรายงานยอดขายกับรายงานช่องทางชำระเงินไม่ตรงกัน
+    // ทางที่ถูกคือยกเลิกเฉพาะรายการที่ไม่ได้ทาน (ลดได้ถึงยอดที่รับไว้) แล้วปิดบิล
+    const { rows: paidRows } = await client.query(
+      'SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = $1', [order.id]
+    );
+    const paid = Number(paidRows[0].paid);
+    if (paid > 0) {
+      throw new AppError(409,
+        `บิลนี้รับชำระไปแล้ว ${money(paid)} บาท ยกเลิกทั้งบิลไม่ได้ — ให้ยกเลิกเฉพาะรายการที่ไม่ได้ทาน แล้วรับเงินส่วนที่เหลือหรือปิดบิล`,
+        { reason: 'HAS_PAYMENTS', paid: money(paid) });
+    }
     const { rows: items } = await client.query(
       `SELECT * FROM order_items WHERE order_id = $1 AND status <> 'CANCELLED'`,
       [order.id]

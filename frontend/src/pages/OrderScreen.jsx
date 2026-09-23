@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { TopBar } from '../components/Layout';
 import { Modal, useToast, Spinner, Empty } from '../components/ui';
+import CustomerQrModal from '../components/CustomerQrModal';
 import { baht, qty as fmtQty, since, TABLE_STATUS } from '../lib/format';
 
 export default function OrderScreen() {
@@ -21,6 +22,7 @@ export default function OrderScreen() {
   const [discountOpen, setDiscountOpen] = useState(false);
   const [discount, setDiscount] = useState(0);
   const [alerts, setAlerts] = useState([]);
+  const [qrOpen, setQrOpen] = useState(false);
 
   async function loadOrder() {
     const r = await api.get(`/orders/${id}`);
@@ -149,6 +151,11 @@ export default function OrderScreen() {
           <i className="dot" />
           {order.status === 'PAID' ? 'ชำระเงินแล้ว' : order.status === 'VOID' ? 'ยกเลิกแล้ว' : st.label}
         </span>
+        {!isClosed && (
+          <button className="btn" onClick={() => setQrOpen(true)}>
+            QR ลูกค้า{order.access_code ? ` · ${order.access_code}` : ''}
+          </button>
+        )}
         <button className="btn" onClick={() => nav('/')}>กลับผังร้าน</button>
       </TopBar>
 
@@ -307,6 +314,8 @@ export default function OrderScreen() {
           </div>
         </aside>
       </div>
+
+      {qrOpen && <CustomerQrModal order={order} onClose={() => setQrOpen(false)} onChanged={setOrder} />}
 
       {discountOpen && (
         <Modal

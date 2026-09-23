@@ -1,4 +1,4 @@
-const BASE = 'http://localhost:4000/api';
+const BASE = process.env.API_BASE || 'http://localhost:4000/api';
 let token = '';
 let pass = 0, fail = 0;
 
@@ -8,6 +8,7 @@ async function call(method, path, body, opts = {}) {
     headers: {
       'Content-Type': 'application/json',
       ...(opts.noAuth ? {} : token ? { Authorization: `Bearer ${token}` } : {}),
+      ...opts.headers,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -150,29 +151,47 @@ console.log('\n=== 9. ฝั่งลูกค้า (ไม่ต้องล�
 x = await call('GET', '/public/menu', null, { noAuth: true });
 check('ลูกค้าดูเมนูได้โดยไม่ต้องล็อกอิน', x.status === 200 && x.json.count === 31, x.json.count);
 
+x = await call('POST', '/public/tables/T12/order', { items: [{ menu_sku: 'MN-B01', qty: 1 }] }, { noAuth: true });
+check('โต๊ะยังไม่เปิด ลูกค้าสั่งเองไม่ได้ -> 404', x.status === 404 && x.json.details?.reason === 'TABLE_NOT_OPEN', x.json);
+
+x = await call('POST', '/orders', { table_no: 'T12', guest_count: 2 });
+check('พนักงานเปิดโต๊ะ T12 -> ได้รหัส 4 หลัก', x.status === 201 && /^\d{4}$/.test(x.json.order.access_code), x.json.order?.access_code);
+const custOrderId = x.json.order.id;
+const tableCode = x.json.order.access_code;
+const cust = { noAuth: true, headers: { 'X-Table-Code': tableCode } };
+
+x = await call('GET', '/public/tables/T12', null, { noAuth: true });
+check('ไม่ส่งรหัสโต๊ะ -> 403', x.status === 403 && x.json.details?.reason === 'CODE_REQUIRED', x.json);
+
+const wrongCode = tableCode === '0000' ? '1111' : '0000';
+x = await call('GET', '/public/tables/T12', null, { noAuth: true, headers: { 'X-Table-Code': wrongCode } });
+check('รหัสโต๊ะผิด -> 403', x.status === 403 && x.json.details?.reason === 'CODE_INVALID', x.json);
+
 x = await call('POST', '/public/tables/T12/order', {
   items: [{ menu_sku: 'MN-B01', qty: 1 }, { menu_sku: 'MN-D01', qty: 2 }],
-}, { noAuth: true });
-check('ลูกค้าสั่งอาหารเอง -> 201', x.status === 201, x.json);
-check('เปิดบิลใหม่อัตโนมัติ', x.json.is_new_order === true, x.json.is_new_order);
+}, cust);
+check('ลูกค้าสั่งอาหารเองด้วยรหัสโต๊ะ -> 201', x.status === 201, x.json);
+check('รอบแรก', x.json.round_no === 1, x.json.round_no);
 check('ยอด = 299 + 30 = 329', r(x.json.order.grand_total) === 329, x.json.order?.grand_total);
-const custOrderId = x.json.order.id;
 
-x = await call('POST', '/public/tables/T12/order', { items: [{ menu_sku: 'MN-B16', qty: 2 }] }, { noAuth: true });
+x = await call('POST', '/public/tables/T12/order', { items: [{ menu_sku: 'MN-B16', qty: 2 }] }, cust);
 check('ลูกค้าสั่งเพิ่ม รอบที่ 2', x.json.round_no === 2, x.json.round_no);
 check('ยอด = 329 + 30 = 359', r(x.json.order.grand_total) === 359, x.json.order?.grand_total);
 
-x = await call('GET', '/public/tables/T12/bill', null, { noAuth: true });
+x = await call('GET', '/public/tables/T12/bill', null, cust);
 check('ลูกค้าดูสรุปบิลได้', x.status === 200 && x.json.data.grand_total === 359, x.json.data?.grand_total);
 
-x = await call('POST', '/public/tables/T12/bill', null, { noAuth: true });
+x = await call('POST', '/public/tables/T12/bill', null, cust);
 check('ลูกค้าเรียกเช็คบิลเอง', x.json.data.status === 'BILLING', x.json.data?.status);
 
-x = await call('POST', '/public/tables/T12/order', { items: [{ menu_sku: 'MN-D01', qty: 1 }] }, { noAuth: true });
+x = await call('POST', '/public/tables/T12/order', { items: [{ menu_sku: 'MN-D01', qty: 1 }] }, cust);
 check('เช็คบิลแล้วสั่งเพิ่มไม่ได้ -> 409', x.status === 409, { status: x.status, err: x.json.error });
 
 x = await call('POST', '/payments', { order_id: custOrderId, method: 'QR', reference_no: 'TXN-0099' });
 check('ชำระผ่าน QR -> 201', x.status === 201 && x.json.order.status === 'PAID', x.json);
+
+x = await call('POST', '/public/tables/T12/order', { items: [{ menu_sku: 'MN-D01', qty: 1 }] }, cust);
+check('ปิดบิลแล้ว รหัสเดิมสั่งกวนไม่ได้ -> 404', x.status === 404 && x.json.details?.reason === 'TABLE_NOT_OPEN', x.json);
 
 console.log('\n=== 10. รับเข้า / เบิกใช้ / ปรับยอดวัตถุดิบ ===');
 x = await call('POST', '/stock/in', {

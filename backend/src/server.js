@@ -1,4 +1,7 @@
 import 'dotenv/config';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
@@ -65,6 +68,15 @@ app.use('/api/payments',    paymentRoutes);
 app.use('/api/stock',       stockRoutes);
 app.use('/api/reports',     reportRoutes);
 app.use('/api/public',      publicRoutes);
+
+// เสิร์ฟหน้าเว็บที่ build แล้ว (frontend/dist) จากพอร์ตเดียวกับ API
+// ใช้ตอนเปิดระบบออกอินเทอร์เน็ต (เช่น Cloudflare Tunnel) แทน Vite dev server
+const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../frontend/dist');
+if (fs.existsSync(path.join(distDir, 'index.html'))) {
+  app.use(express.static(distDir, { index: false }));
+  // เส้นทางของ React Router (เช่น /customer/T01) ให้ส่ง index.html กลับไป
+  app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
+}
 
 app.use(notFound);
 app.use(errorHandler);

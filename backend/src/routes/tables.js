@@ -1,3 +1,4 @@
+import os from 'node:os';
 import { Router } from 'express';
 import { query } from '../db.js';
 import { AppError, wrap } from '../utils.js';
@@ -30,6 +31,23 @@ router.get('/', authRequired, wrap(async (req, res) => {
   );
 
   res.json({ ok: true, summary, data: rows });
+}));
+
+/**
+ * GET /api/tables/qr-info — ข้อมูลสำหรับสร้าง QR สั่งอาหารประจำโต๊ะ
+ * คืนที่อยู่เว็บที่ตั้งไว้ และ IP ของเครื่องเซิร์ฟเวอร์ในวง LAN
+ * (มือถือลูกค้าเปิด localhost ไม่ได้ จึงต้องใช้ IP ของเครื่องแทน)
+ */
+router.get('/qr-info', authRequired, wrap(async (_req, res) => {
+  const { rows } = await query(`SELECT value FROM settings WHERE key = 'customer_base_url'`);
+  // การ์ดเครือข่ายเสมือน (WSL, Hyper-V, Docker, VirtualBox, VMware) มือถือเข้าไม่ถึง จึงเรียงไว้ท้ายสุด
+  const isVirtual = (name) => /vEthernet|WSL|Hyper-V|Docker|VirtualBox|VMware|Loopback/i.test(name);
+  const lan = Object.entries(os.networkInterfaces())
+    .flatMap(([name, addrs]) => (addrs || []).map((a) => ({ ...a, name })))
+    .filter((a) => a.family === 'IPv4' && !a.internal)
+    .sort((a, b) => isVirtual(a.name) - isVirtual(b.name))
+    .map((a) => a.address);
+  res.json({ ok: true, data: { customer_base_url: rows[0]?.value || null, lan_addresses: lan } });
 }));
 
 /** GET /api/tables/:id — สถานะโต๊ะเดียว */

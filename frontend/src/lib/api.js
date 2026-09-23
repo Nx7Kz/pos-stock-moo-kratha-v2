@@ -31,6 +31,7 @@ async function request(method, path, body, opts = {}) {
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...(auth.token && !opts.noAuth ? { Authorization: `Bearer ${auth.token}` } : {}),
+      ...opts.headers,
     },
     body: body ? JSON.stringify(body) : undefined,
   });

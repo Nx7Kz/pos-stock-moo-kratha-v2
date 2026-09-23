@@ -368,11 +368,37 @@ a { color: inherit; text-decoration: none; }
 .receipt-row.big { font-size: 15px; font-weight: 700; }
 .receipt-item { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
 
+/* --------------------------------------------------- QR ประจำโต๊ะ (พิมพ์ติดโต๊ะ) */
+.qr-sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.qr-card {
+  background: #fff; border: 1px dashed var(--line-strong); border-radius: 10px;
+  padding: 16px 12px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  text-align: center; break-inside: avoid;
+}
+.qr-card-shop { font-size: 12px; color: var(--muted); }
+.qr-card-table { font-size: 26px; font-weight: 700; color: var(--accent); }
+.qr-card-hint { font-size: 13px; font-weight: 600; }
+
+/* ใบ QR สั่งอาหาร (ออกตอนเปิดโต๊ะ) */
+.qr-slip { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.qr-slip-code-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.qr-slip-code { font-size: 38px; font-weight: 700; letter-spacing: .3em; padding-left: .3em; font-variant-numeric: tabular-nums; }
+.code-input {
+  font-size: 32px; font-weight: 700; letter-spacing: .4em; text-align: center;
+  padding: 12px 8px 12px calc(8px + .4em); font-variant-numeric: tabular-nums;
+}
+
 @media print {
   body { background: #fff; }
   .no-print, .sidebar, .topbar { display: none !important; }
   .content { padding: 0 !important; }
   .receipt { border: 0; width: 100%; }
+  .qr-sheet { grid-template-columns: repeat(3, 1fr); gap: 8mm; }
+
+  /* พิมพ์เฉพาะใบ QR จากหน้าต่างเปิดโต๊ะ */
+  body.print-slip * { visibility: hidden; }
+  body.print-slip .qr-slip, body.print-slip .qr-slip * { visibility: visible; }
+  body.print-slip .qr-slip { position: fixed; top: 0; left: 0; width: 72mm; }
 }
 
 /* ------------------------------------------------------------- utilities */

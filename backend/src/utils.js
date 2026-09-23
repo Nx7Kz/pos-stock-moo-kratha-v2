@@ -1,3 +1,5 @@
+import { randomInt } from 'node:crypto';
+
 /** ข้อผิดพลาดที่รู้สาเหตุ ส่ง HTTP status กลับได้ตรง ๆ */
 export class AppError extends Error {
   constructor(status, message, details) {
@@ -30,6 +32,9 @@ export async function nextDocNo(client, { table, column, prefix }) {
   );
   return `${prefix}${code}-${String(rows[0].seq).padStart(4, '0')}`;
 }
+
+/** รหัสโต๊ะ 4 หลักแบบสุ่ม ให้ลูกค้าใช้สั่งอาหารเองระหว่างที่บิลยังเปิดอยู่ */
+export const accessCode = () => String(randomInt(0, 10000)).padStart(4, '0');
 
 /** ปัดทศนิยม 2 ตำแหน่งแบบเงินบาท */
 export const money = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;

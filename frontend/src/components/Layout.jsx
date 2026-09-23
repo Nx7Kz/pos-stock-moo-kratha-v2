@@ -57,6 +57,10 @@ export default function Layout() {
             )
           )}
           <div className="nav-label">ฝั่งลูกค้า</div>
+          <NavLink to="/tables/qr" className={({ isActive }) => (isActive ? 'active' : '')}>
+            <span className="ico">▣</span>
+            <span>QR Code ประจำโต๊ะ</span>
+          </NavLink>
           <a href="/customer/T01" target="_blank" rel="noreferrer">
             <span className="ico">▧</span>
             <span>หน้าลูกค้า (ตัวอย่าง)</span>

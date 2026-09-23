@@ -23,6 +23,10 @@
     {
       "key": "table_no",
       "value": "T05"
+    },
+    {
+      "key": "table_code",
+      "value": ""
     }
   ],
   "item": [
@@ -2385,7 +2389,7 @@
     },
     {
       "name": "9. ฝั่งลูกค้า (ไม่ต้องล็อกอิน)",
-      "description": "ลูกค้าสแกน QR ที่โต๊ะ แล้วเปิดหน้าเมนูสั่งอาหารเองได้",
+      "description": "พนักงานเปิดโต๊ะแล้วได้รหัส 4 หลัก ลูกค้าสแกน QR แล้วสั่งอาหารเองได้ (ต้องแนบ header X-Table-Code) ชำระเงินที่เคาน์เตอร์",
       "item": [
         {
           "name": "ดูเมนูอาหาร (ลูกค้า)",
@@ -2422,10 +2426,61 @@
           ]
         },
         {
+          "name": "พนักงานเปิดโต๊ะ T12 (ได้รหัส 4 หลัก)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"table_no\": \"T12\",\n  \"guest_count\": 2\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/orders",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "เปิดโต๊ะให้ลูกค้า ระบบสุ่มรหัส access_code 4 หลัก ใช้ใน QR ให้ลูกค้าสแกนสั่งอาหาร"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"สถานะ 201\", () => pm.response.to.have.status(201));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"ได้รหัสโต๊ะ 4 หลัก\", () => pm.expect(j.order.access_code).to.match(/^d{4}$/));",
+                  "pm.environment.set(\"table_code\", j.order.access_code);",
+                  "pm.collectionVariables.set(\"table_code\", j.order.access_code);",
+                  "pm.environment.set(\"cust_order_id\", j.order.id);",
+                  "pm.collectionVariables.set(\"cust_order_id\", j.order.id);",
+                  "console.log(\"รหัสโต๊ะ T12 =\", j.order.access_code);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "ดูสถานะโต๊ะของตัวเอง",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "X-Table-Code",
+                "value": "{{table_code}}",
+                "description": "รหัสโต๊ะ 4 หลักที่ได้ตอนพนักงานเปิดโต๊ะ"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/public/tables/T12",
               "host": [
@@ -2455,18 +2510,23 @@
           ]
         },
         {
-          "name": "ลูกค้าสั่งอาหารเอง (เปิดบิลอัตโนมัติ)",
+          "name": "ลูกค้าสั่งอาหารเอง (ใช้รหัสโต๊ะ)",
           "request": {
             "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "X-Table-Code",
+                "value": "{{table_code}}",
+                "description": "รหัสโต๊ะ 4 หลักที่ได้ตอนพนักงานเปิดโต๊ะ"
               }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"guest_count\": 2,\n  \"items\": [\n    {\n      \"menu_sku\": \"MN-B01\",\n      \"qty\": 1\n    },\n    {\n      \"menu_sku\": \"MN-D01\",\n      \"qty\": 2\n    }\n  ]\n}"
+              "raw": "{\n  \"items\": [\n    {\n      \"menu_sku\": \"MN-B01\",\n      \"qty\": 1\n    },\n    {\n      \"menu_sku\": \"MN-D01\",\n      \"qty\": 2\n    }\n  ]\n}"
             },
             "url": {
               "raw": "{{base_url}}/public/tables/T12/order",
@@ -2510,6 +2570,11 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "X-Table-Code",
+                "value": "{{table_code}}",
+                "description": "รหัสโต๊ะ 4 หลักที่ได้ตอนพนักงานเปิดโต๊ะ"
               }
             ],
             "body": {
@@ -2550,7 +2615,13 @@
           "name": "สรุปรายการและยอดเงินของโต๊ะ",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "X-Table-Code",
+                "value": "{{table_code}}",
+                "description": "รหัสโต๊ะ 4 หลักที่ได้ตอนพนักงานเปิดโต๊ะ"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/public/tables/T12/bill",
               "host": [
@@ -2582,44 +2653,16 @@
           ]
         },
         {
-          "name": "QR พร้อมเพย์สำหรับชำระเงิน",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/public/tables/T12/qr",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "public",
-                "tables",
-                "T12",
-                "qr"
-              ]
-            },
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"สถานะ 200\", () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
           "name": "ลูกค้ากดเรียกเช็คบิล",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "X-Table-Code",
+                "value": "{{table_code}}",
+                "description": "รหัสโต๊ะ 4 หลักที่ได้ตอนพนักงานเปิดโต๊ะ"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/public/tables/T12/bill",
               "host": [

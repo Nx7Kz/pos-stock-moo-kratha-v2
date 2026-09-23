@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { TopBar } from '../components/Layout';
 import { Modal, useToast, Spinner } from '../components/ui';
+import CustomerQrModal from '../components/CustomerQrModal';
 import { baht, num, since, TABLE_STATUS } from '../lib/format';
 
 export default function FloorPlan() {
@@ -15,6 +16,7 @@ export default function FloorPlan() {
   const [opening, setOpening] = useState(null);   // โต๊ะที่กำลังจะเปิดบิล
   const [guests, setGuests] = useState(2);
   const [busy, setBusy] = useState(false);
+  const [issued, setIssued] = useState(null);     // บิลที่เพิ่งเปิด รอให้ลูกค้าสแกน QR
 
   async function load() {
     try {
@@ -45,10 +47,13 @@ export default function FloorPlan() {
     setBusy(true);
     try {
       const r = await api.post('/orders', { table_id: opening.id, guest_count: guests });
-      toast(`เปิดบิล ${r.order.order_no} โต๊ะ ${opening.table_no}`, 'ok');
-      nav(`/order/${r.order.id}`);
+      toast(`เปิดโต๊ะ ${opening.table_no} แล้ว · รหัส ${r.order.access_code}`, 'ok');
+      setOpening(null);
+      setIssued(r.order);   // โชว์ QR + รหัสให้ลูกค้าสแกนสั่งอาหารเอง
+      load();
     } catch (e) {
       toast(e.message, 'err');
+    } finally {
       setBusy(false);
     }
   }
@@ -128,7 +133,7 @@ export default function FloorPlan() {
             <>
               <button className="btn" onClick={() => setOpening(null)} disabled={busy}>ยกเลิก</button>
               <button className="btn btn-accent" onClick={openBill} disabled={busy}>
-                {busy ? 'กำลังเปิดบิล…' : 'เปิดบิลและสั่งอาหาร'}
+                {busy ? 'กำลังเปิดโต๊ะ…' : 'เปิดโต๊ะ + ออก QR'}
               </button>
             </>
           }
@@ -146,6 +151,17 @@ export default function FloorPlan() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {issued && (
+        <CustomerQrModal
+          order={issued}
+          onClose={() => setIssued(null)}
+          onChanged={setIssued}
+          extraActions={
+            <button className="btn" onClick={() => nav(`/order/${issued.id}`)}>สั่งอาหารให้ลูกค้า</button>
+          }
+        />
       )}
     </>
   );

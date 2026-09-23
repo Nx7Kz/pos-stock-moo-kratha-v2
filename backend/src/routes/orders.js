@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { query, withTransaction } from '../db.js';
-import { AppError, wrap, nextDocNo, money } from '../utils.js';
+import { AppError, wrap, nextDocNo, money, accessCode } from '../utils.js';
 import { authRequired } from '../middleware/auth.js';
 import { applyRecipe, checkAvailability } from '../services/stockService.js';
 import { recalcOrder, getOrderFull, syncTableStatus } from '../services/orderService.js';
@@ -54,9 +54,9 @@ router.post('/', authRequired, wrap(async (req, res) => {
 
     const orderNo = await nextDocNo(client, { table: 'orders', column: 'order_no', prefix: 'OD' });
     const { rows } = await client.query(
-      `INSERT INTO orders (order_no, table_id, guest_count, note, opened_by, channel)
-       VALUES ($1,$2,$3,$4,$5,'STAFF') RETURNING *`,
-      [orderNo, tbl[0].id, guest_count, note ?? null, req.user.id]
+      `INSERT INTO orders (order_no, table_id, guest_count, note, opened_by, channel, access_code)
+       VALUES ($1,$2,$3,$4,$5,'STAFF',$6) RETURNING *`,
+      [orderNo, tbl[0].id, guest_count, note ?? null, req.user.id, accessCode()]
     );
 
     const alerts = [];
@@ -205,6 +205,19 @@ router.patch('/:id', authRequired, wrap(async (req, res) => {
     return getOrderFull(client, order.id);
   });
   res.json({ ok: true, data });
+}));
+
+/**
+ * POST /api/orders/:id/access-code — สุ่มรหัสโต๊ะใหม่
+ * ใช้เมื่อรหัสหลุดไปถึงคนอื่น หรือบิลเก่าที่ยังไม่มีรหัส — รหัสเดิมใช้ไม่ได้ทันที
+ */
+router.post('/:id/access-code', authRequired, wrap(async (req, res) => {
+  const data = await withTransaction(async (client) => {
+    const order = await lockOpenOrder(client, req.params.id);
+    await client.query('UPDATE orders SET access_code = $2 WHERE id = $1', [order.id, accessCode()]);
+    return getOrderFull(client, order.id);
+  });
+  res.json({ ok: true, message: `เปลี่ยนรหัสโต๊ะเป็น ${data.access_code} แล้ว`, data });
 }));
 
 /** POST /api/orders/:id/void — ยกเลิกทั้งบิล (คืนสต็อกทุกรายการ) */

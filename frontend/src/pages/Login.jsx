@@ -4,8 +4,8 @@ import { api, auth } from '../lib/api';
 
 export default function Login() {
   const nav = useNavigate();
-  const [username, setUsername] = useState('owner');
-  const [password, setPassword] = useState('owner123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -52,11 +52,6 @@ export default function Login() {
             <button className="btn btn-accent btn-block btn-lg" disabled={busy || !username || !password}>
               {busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
             </button>
-
-            <div className="hint-box">
-              บัญชีทดสอบ — เจ้าของร้าน <code>owner</code> / <code>owner123</code>
-              <br />พนักงาน <code>staff1</code> / <code>staff123</code>
-            </div>
           </div>
         </form>
       </div>

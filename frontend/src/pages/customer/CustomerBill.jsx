@@ -1,29 +1,41 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { useToast, Spinner, Empty, QrImage } from '../../components/ui';
+import { useToast, Spinner, Empty } from '../../components/ui';
 import { baht, qty as fmtQty, timeOnly } from '../../lib/format';
+import { setCode, clearCode, publicOpts, sessionProblem } from './session';
+import CodeGate from './CodeGate';
 
+/**
+ * รายการที่สั่งของโต๊ะ — ลูกค้าไม่ต้องจ่ายผ่านมือถือ
+ * กดเช็คบิลเมื่อทานเสร็จ แล้วไปชำระเงินที่เคาน์เตอร์
+ */
 export default function CustomerBill() {
   const { tableNo } = useParams();
   const nav = useNavigate();
   const toast = useToast();
 
   const [bill, setBill] = useState(null);
-  const [qr, setQr] = useState(null);
+  const [paid, setPaid] = useState(false);     // บิลที่เคยเห็นหายไป = พนักงานรับชำระแล้ว
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState(null);
+  const seenOrder = useRef(null);
 
   async function load() {
     try {
-      const r = await api.get(`/public/tables/${tableNo}/bill`, { noAuth: true });
+      const r = await api.get(`/public/tables/${tableNo}/bill`, publicOpts(tableNo));
+      seenOrder.current = r.data.order_no;
       setBill(r.data);
-      if (r.data) {
-        const q = await api.get(`/public/tables/${tableNo}/qr`, { noAuth: true });
-        setQr(q.data);
-      }
+      setProblem(null);
     } catch (e) {
-      toast(e.message, 'err');
+      const p = sessionProblem(e);
+      if (!p) return toast(e.message, 'err');
+      if (p.reason === 'CODE_INVALID' || p.reason === 'TABLE_NOT_OPEN') clearCode(tableNo);
+      setBill(null);
+      // บิลที่เคยเห็นปิดไปแล้ว = พนักงานรับชำระที่เคาน์เตอร์เรียบร้อย
+      if (seenOrder.current && p.reason === 'TABLE_NOT_OPEN') setPaid(true);
+      else setProblem(p);
     } finally {
       setLoading(false);
     }
@@ -31,17 +43,18 @@ export default function CustomerBill() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 20000);   // อัปเดตยอดเมื่อพนักงานเพิ่มรายการให้
+    const id = setInterval(load, 15000);   // อัปเดตยอด และรู้ว่าชำระที่เคาน์เตอร์เสร็จแล้ว
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableNo]);
 
   async function callBill() {
+    if (!confirm('ต้องการเช็คบิลตอนนี้ใช่ไหม?\nหลังเช็คบิลจะสั่งอาหารเพิ่มเองไม่ได้')) return;
     setBusy(true);
     try {
-      const r = await api.post(`/public/tables/${tableNo}/bill`, null, { noAuth: true });
-      toast(r.message, 'ok');
-      load();
+      await api.post(`/public/tables/${tableNo}/bill`, null, publicOpts(tableNo));
+      toast('เช็คบิลแล้ว กรุณาชำระเงินที่เคาน์เตอร์', 'ok');
+      await load();
     } catch (e) {
       toast(e.message, 'err');
     } finally {
@@ -49,7 +62,15 @@ export default function CustomerBill() {
     }
   }
 
-  if (loading) return <Spinner label="กำลังโหลดบิล…" />;
+  if (loading) return <Spinner label="กำลังโหลดรายการ…" />;
+  if (problem && !paid) {
+    return (
+      <CodeGate tableNo={tableNo} problem={problem} onRetry={load}
+        onSubmit={async (code) => { setCode(tableNo, code); await load(); }} />
+    );
+  }
+
+  const isBilling = bill?.status === 'BILLING';
 
   return (
     <>
@@ -57,7 +78,7 @@ export default function CustomerBill() {
         <div className="cust-top-inner">
           <button className="btn btn-sm" onClick={() => nav(`/customer/${tableNo}`)}>‹ เมนู</button>
           <div className="grow center">
-            <div className="bold">สรุปรายการและชำระเงิน</div>
+            <div className="bold">รายการที่สั่ง</div>
             <div className="tiny faint">โต๊ะ {tableNo}</div>
           </div>
           <span style={{ width: 58 }} />
@@ -66,7 +87,12 @@ export default function CustomerBill() {
 
       <div className="cust-shell">
         <div className="content">
-          {!bill ? (
+          {paid && !bill ? (
+            <Empty icon="✅">
+              ชำระเงินเรียบร้อยแล้ว
+              <div className="small" style={{ marginTop: 6 }}>ขอบคุณที่ใช้บริการ แล้วพบกันใหม่นะครับ/ค่ะ</div>
+            </Empty>
+          ) : !bill ? (
             <Empty icon="🥢">
               ยังไม่มีรายการสั่งอาหาร
               <div style={{ marginTop: 14 }}>
@@ -77,8 +103,8 @@ export default function CustomerBill() {
             <div className="pay-grid">
               <div className="card">
                 <div className="card-head">
-                  <h2>รายการอาหารของคุณ</h2>
-                  <span className="sub">{bill.order_no} · {bill.guest_count} ท่าน</span>
+                  <h2>รายการอาหารของโต๊ะนี้</h2>
+                  <span className="sub">{bill.guest_count} ท่าน · เปิดโต๊ะ {timeOnly(bill.opened_at)} น.</span>
                 </div>
 
                 <div className="card-body flush">
@@ -109,43 +135,38 @@ export default function CustomerBill() {
                   {Number(bill.service_charge) > 0 && <div className="sum-row"><span>ค่าบริการ</span><span>{baht(bill.service_charge)}</span></div>}
                   {Number(bill.vat_amount) > 0 && <div className="sum-row"><span>ภาษีมูลค่าเพิ่ม</span><span>{baht(bill.vat_amount)}</span></div>}
                   <div className="sum-row total"><span>ยอดสุทธิ</span><span>{baht(bill.grand_total)} ฿</span></div>
-                  <div className="tiny faint mt">เปิดบิลเมื่อ {timeOnly(bill.opened_at)} น.</div>
                 </div>
               </div>
 
               <div className="card">
-                <div className="card-head"><h2>ชำระเงินด้วย QR Code</h2></div>
+                <div className="card-head"><h2>ชำระเงินที่เคาน์เตอร์</h2></div>
                 <div className="card-body stack">
-                  {qr && (
-                    <div className="qr-box">
-                      <QrImage payload={qr.qr_payload} />
-                      <div className="center">
-                        <div className="bold" style={{ fontSize: 22 }}>{baht(qr.amount)} บาท</div>
-                        <div className="small muted">{qr.shop_name}</div>
-                        <div className="tiny faint">สแกนด้วยแอปธนาคารเพื่อชำระผ่านพร้อมเพย์</div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="alert alert-info">
-                    <span>ℹ</span>
-                    <div>ชำระด้วยเงินสดหรือโอนเงินก็ได้ กรุณาแจ้งพนักงานที่เคาน์เตอร์</div>
+                  <div className="center">
+                    <div className="small muted">แจ้งพนักงานที่เคาน์เตอร์ว่า</div>
+                    <div className="bold" style={{ fontSize: 34, color: 'var(--accent)' }}>โต๊ะ {bill.table_no}</div>
+                    <div className="small muted">ยอดที่ต้องชำระ</div>
+                    <div className="bold" style={{ fontSize: 24 }}>{baht(bill.grand_total)} บาท</div>
                   </div>
 
-                  {bill.status === 'BILLING' ? (
+                  {isBilling ? (
                     <div className="alert alert-warn">
                       <span>✓</span>
-                      <div>เรียกพนักงานเช็คบิลแล้ว กรุณารอสักครู่</div>
+                      <div>เช็คบิลแล้ว — เดินไปชำระเงินที่เคาน์เตอร์ได้เลย (เงินสด · โอน · สแกน QR)</div>
                     </div>
                   ) : (
-                    <button className="btn btn-accent btn-block btn-lg" onClick={callBill} disabled={busy}>
-                      {busy ? 'กำลังเรียก…' : 'เรียกพนักงานเช็คบิล'}
-                    </button>
+                    <>
+                      <div className="alert alert-info">
+                        <span>ℹ</span>
+                        <div>ยังไม่ต้องจ่ายตอนนี้ ทานให้อิ่มแล้วกด <strong>เช็คบิล</strong> จากนั้นไปชำระที่เคาน์เตอร์ รับเงินสด · โอน · สแกน QR</div>
+                      </div>
+                      <button className="btn btn-accent btn-block btn-lg" onClick={callBill} disabled={busy}>
+                        {busy ? 'กำลังเช็คบิล…' : 'เช็คบิล'}
+                      </button>
+                      <button className="btn btn-block" onClick={() => nav(`/customer/${tableNo}`)}>
+                        สั่งอาหารเพิ่ม
+                      </button>
+                    </>
                   )}
-
-                  <button className="btn btn-block" onClick={() => nav(`/customer/${tableNo}`)}>
-                    สั่งอาหารเพิ่ม
-                  </button>
                 </div>
               </div>
             </div>

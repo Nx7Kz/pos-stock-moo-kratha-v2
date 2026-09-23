@@ -133,6 +133,7 @@ CREATE TABLE orders (
     vat_amount     NUMERIC(12,2) NOT NULL DEFAULT 0,
     grand_total    NUMERIC(12,2) NOT NULL DEFAULT 0,
     note           TEXT,
+    access_code    VARCHAR(8),   -- รหัส 4 หลักให้ลูกค้าสั่งอาหารเองได้ ใช้ได้เฉพาะตอนบิลยังเปิดอยู่
     opened_by      INT           REFERENCES users(id),
     closed_by      INT           REFERENCES users(id),
     opened_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),

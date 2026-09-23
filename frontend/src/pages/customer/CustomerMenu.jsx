@@ -1,13 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { useToast, Spinner, Empty } from '../../components/ui';
+import { useToast, Spinner, Empty, Modal } from '../../components/ui';
 import { baht } from '../../lib/format';
+import { setCode, clearCode, publicOpts, sessionProblem } from './session';
+import CodeGate from './CodeGate';
 
 export default function CustomerMenu() {
   const { tableNo } = useParams();
   const nav = useNavigate();
   const toast = useToast();
+  const [params, setParams] = useSearchParams();
 
   const [menu, setMenu] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -17,16 +20,36 @@ export default function CustomerMenu() {
   const [cart, setCart] = useState({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [problem, setProblem] = useState(null);   // รหัสผิด / ยังไม่มีรหัส / โต๊ะยังไม่เปิด
+
+  /** สถานะโต๊ะ + ยอดสะสม (อัปเดตหลังสั่งอาหาร) */
+  /** error เรื่องรหัสโต๊ะ -> เปลี่ยนไปหน้ากรอกรหัส, error อื่นแสดงเป็น toast */
+  function handleError(e) {
+    const p = sessionProblem(e);
+    if (!p) return toast(e.message, 'err');
+    if (p.reason === 'CODE_INVALID' || p.reason === 'TABLE_NOT_OPEN') clearCode(tableNo);
+    setProblem(p);
+    setConfirmOpen(false);
+  }
+
+  /** ตรวจรหัสโต๊ะ + ยอดสะสม (อัปเดตหลังสั่งอาหาร) */
+  async function loadTable() {
+    try {
+      const t = await api.get(`/public/tables/${tableNo}`, publicOpts(tableNo));
+      setTable(t.data);
+      setProblem(null);
+    } catch (e) {
+      handleError(e);
+    }
+  }
 
   async function load() {
     try {
-      const [m, t] = await Promise.all([
-        api.get('/public/menu', { noAuth: true }),
-        api.get(`/public/tables/${tableNo}`, { noAuth: true }),
-      ]);
+      const m = await api.get('/public/menu', { noAuth: true });
       setMenu(m.data);
       setCategories(m.categories);
-      setTable(t.data);
+      await loadTable();
     } catch (e) {
       toast(e.message, 'err');
     } finally {
@@ -34,7 +57,21 @@ export default function CustomerMenu() {
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [tableNo]);
+  useEffect(() => {
+    // สแกน QR จากใบเปิดโต๊ะ -> ลิงก์มีรหัสมาด้วย จำไว้แล้วลบออกจากแถบที่อยู่
+    const code = params.get('code');
+    if (code) {
+      setCode(tableNo, code);
+      setParams({}, { replace: true });
+    }
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableNo]);
+
+  async function enterCode(code) {
+    setCode(tableNo, code);
+    await loadTable();
+  }
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -61,17 +98,23 @@ export default function CustomerMenu() {
     try {
       const r = await api.post(`/public/tables/${tableNo}/order`,
         { items: lines.map((l) => ({ menu_item_id: l.item.id, qty: l.qty })) },
-        { noAuth: true });
-      toast(r.message, 'ok');
+        publicOpts(tableNo));
+      // สั่งแล้วอยู่หน้าเมนูต่อ สั่งเพิ่มได้เรื่อย ๆ ไปจ่ายเงินที่เคาน์เตอร์ตอนกลับ
+      toast(`ส่งออเดอร์เข้าครัวแล้ว (${r.round_no > 1 ? `รอบที่ ${r.round_no}` : 'รอบแรก'})`, 'ok');
       setCart({});
-      nav(`/customer/${tableNo}/bill`);
+      setConfirmOpen(false);
+      loadTable();
     } catch (e) {
-      toast(e.message, 'err');
+      handleError(e);
+    } finally {
       setBusy(false);
     }
   }
 
   if (loading) return <Spinner label="กำลังโหลดเมนู…" />;
+  if (problem) return <CodeGate tableNo={tableNo} problem={problem} onSubmit={enterCode} onRetry={loadTable} />;
+
+  const isBilling = table?.status === 'BILLING';
 
   return (
     <>
@@ -82,15 +125,27 @@ export default function CustomerMenu() {
             <div className="bold">ร้านย่างให้หมูกระทะ บ้านน้องโฟค</div>
             <div className="tiny faint">
               โต๊ะ {tableNo}
-              {table?.order_no && ` · บิล ${table.order_no}`}
+              {table?.order_no && ` · ยอดสะสม ${baht(table.current_total)} ฿`}
             </div>
           </div>
-          <button className="btn btn-sm" onClick={() => nav(`/customer/${tableNo}/bill`)}>ดูบิล</button>
+          <button className="btn btn-sm" onClick={() => nav(`/customer/${tableNo}/bill`)}>รายการที่สั่ง</button>
         </div>
       </div>
 
       <div className="cust-shell">
         <div className="content stack">
+          {isBilling ? (
+            <div className="alert alert-warn">
+              <span>🧾</span>
+              <div>เช็คบิลแล้ว — กรุณาแจ้ง <strong>โต๊ะ {tableNo}</strong> และชำระเงินที่เคาน์เตอร์ หากต้องการสั่งเพิ่มกรุณาแจ้งพนักงาน</div>
+            </div>
+          ) : (
+            <div className="alert alert-info">
+              <span>ℹ</span>
+              <div>สั่งได้เลย ยังไม่ต้องจ่าย — สั่งเพิ่มได้ตลอด แล้วค่อย<strong>ชำระเงินที่เคาน์เตอร์</strong>ตอนกลับ</div>
+            </div>
+          )}
+
           <input className="input" placeholder="ค้นหาเมนู…" value={search} onChange={(e) => setSearch(e.target.value)} />
 
           <div className="cat-tabs">
@@ -121,7 +176,7 @@ export default function CustomerMenu() {
                           <button className="qty-btn" onClick={() => setQty(m.id, inCart + 1)}>+</button>
                         </div>
                       ) : (
-                        <button className="btn btn-sm btn-accent" onClick={() => add(m)}>เพิ่ม</button>
+                        <button className="btn btn-sm btn-accent" onClick={() => add(m)} disabled={isBilling}>เพิ่ม</button>
                       )}
                     </div>
                   </div>
@@ -136,15 +191,48 @@ export default function CustomerMenu() {
         <div className="cust-cart">
           <div className="cust-cart-inner">
             <div className="grow">
-              <div className="bold">{count} รายการ</div>
-              <div className="tiny faint">แตะเพื่อส่งออเดอร์ไปที่ครัว</div>
+              <div className="bold">ตะกร้า {count} รายการ</div>
+              <div className="tiny faint">ตรวจสอบก่อนส่งเข้าครัว</div>
             </div>
             <div className="bold" style={{ fontSize: 19 }}>{baht(total)} ฿</div>
-            <button className="btn btn-accent btn-lg" onClick={submit} disabled={busy}>
-              {busy ? 'กำลังส่ง…' : 'สั่งอาหาร'}
+            <button className="btn btn-accent btn-lg" onClick={() => setConfirmOpen(true)} disabled={isBilling}>
+              ดูตะกร้า
             </button>
           </div>
         </div>
+      )}
+
+      {confirmOpen && (
+        <Modal
+          title={`ยืนยันสั่งอาหาร · โต๊ะ ${tableNo}`}
+          onClose={() => !busy && setConfirmOpen(false)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setConfirmOpen(false)} disabled={busy}>เลือกเพิ่ม</button>
+              <button className="btn btn-accent" onClick={submit} disabled={busy || !lines.length}>
+                {busy ? 'กำลังส่ง…' : `ยืนยันสั่ง ${baht(total)} ฿`}
+              </button>
+            </>
+          }
+        >
+          <div className="stack-sm">
+            {lines.map((l) => (
+              <div key={l.item.id} className="row">
+                <div className="grow">
+                  <div className="bold small">{l.item.name_th}</div>
+                  <div className="tiny faint">{baht(l.item.price)} × {l.qty}</div>
+                </div>
+                <div className="qty-box">
+                  <button className="qty-btn" onClick={() => setQty(l.item.id, l.qty - 1)} disabled={busy}>−</button>
+                  <span className="qty-num">{l.qty}</span>
+                  <button className="qty-btn" onClick={() => setQty(l.item.id, l.qty + 1)} disabled={busy}>+</button>
+                </div>
+              </div>
+            ))}
+            {!lines.length && <div className="muted small">ตะกร้าว่าง</div>}
+            <div className="tiny faint mt">ยังไม่ต้องชำระตอนนี้ ยอดจะรวมไว้ในบิลของโต๊ะ ชำระที่เคาน์เตอร์ตอนกลับ</div>
+          </div>
+        </Modal>
       )}
     </>
   );

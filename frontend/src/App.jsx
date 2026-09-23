@@ -12,6 +12,7 @@ import Receipt from './pages/Receipt';
 import MenuManage from './pages/MenuManage';
 import StockPage from './pages/StockPage';
 import Reports from './pages/Reports';
+import TableQr from './pages/TableQr';
 import CustomerMenu from './pages/customer/CustomerMenu';
 import CustomerBill from './pages/customer/CustomerBill';
 
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="/menu" element={<MenuManage />} />
             <Route path="/stock" element={<StockPage />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/tables/qr" element={<TableQr />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

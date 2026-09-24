@@ -11,6 +11,8 @@
     "db:migrate": "node scripts/migrate.js",
     "db:reset": "node scripts/migrate.js --reset",
     "db:demo": "node scripts/demo-data.js",
+    "db:backup": "node scripts/backup.js",
+    "db:restore": "node scripts/restore.js",
     "test": "node tests/api.test.mjs"
   },
   "dependencies": {

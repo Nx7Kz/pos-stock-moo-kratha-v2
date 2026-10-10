@@ -22,13 +22,23 @@ export default function SoundSwitch() {
   }
 
   const waiting = on && locked;   // เปิดไว้แล้ว แต่เบราว์เซอร์ยังรอให้แตะหน้าจอก่อน
+  let mode = 'off';
+  if (waiting) mode = 'waiting';
+  else if (on) mode = 'on';
   return (
     <button type="button" role="switch" aria-checked={on} onClick={toggle}
       className={`sound-switch${on ? ' on' : ''}${waiting ? ' waiting' : ''}`}
-      title={waiting ? 'แตะหน้าจอหนึ่งครั้งเพื่อให้เสียงเริ่มทำงาน' : on ? 'กดเพื่อปิดเสียงเตือน' : 'กดเพื่อเปิดเสียงเตือน'}>
+      title={TEXT[mode].title}>
       <span className="ss-label">{on ? '🔔' : '🔕'} เสียงเตือน</span>
       <span className="ss-track"><span className="ss-knob" /></span>
-      <span className="ss-state">{waiting ? 'แตะเพื่อเริ่ม' : on ? 'เปิด' : 'ปิด'}</span>
+      <span className="ss-state">{TEXT[mode].state}</span>
     </button>
   );
 }
+
+/** ข้อความบนสวิตช์ตามสถานะ */
+const TEXT = {
+  waiting: { title: 'แตะหน้าจอหนึ่งครั้งเพื่อให้เสียงเริ่มทำงาน', state: 'แตะเพื่อเริ่ม' },
+  on: { title: 'กดเพื่อปิดเสียงเตือน', state: 'เปิด' },
+  off: { title: 'กดเพื่อเปิดเสียงเตือน', state: 'ปิด' },
+};

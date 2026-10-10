@@ -108,31 +108,7 @@ router.patch('/:id/items/:itemId', authRequired, wrap(async (req, res) => {
     if (!item) throw new AppError(404, 'ไม่พบรายการอาหารในบิลนี้');
     if (item.status === 'CANCELLED') throw new AppError(409, 'รายการนี้ถูกยกเลิกไปแล้ว');
 
-    let alerts = [];
-    if (qty !== undefined) {
-      if (Number(qty) <= 0) throw new AppError(400, 'จำนวนต้องมากกว่า 0 (ถ้าต้องการยกเลิกให้ใช้ DELETE)');
-      const diff = Number(qty) - Number(item.qty);
-      if (diff !== 0) {
-        if (diff > 0) {
-          const short = await checkAvailability(client, item.menu_item_id, diff);
-          if (short.length) throw new AppError(409, `วัตถุดิบไม่พอสำหรับเพิ่มจำนวน: ${short.map((s) => s.name_th).join(', ')}`, short);
-        }
-        alerts = await applyRecipe(client, {
-          menuItemId: item.menu_item_id,
-          qty: Math.abs(diff),
-          sign: diff > 0 ? -1 : 1,
-          refType: 'ORDER',
-          refId: order.id,
-          refNo: order.order_no,
-          userId: req.user.id,
-          note: `แก้ไขจำนวน ${item.qty} -> ${qty}`,
-        });
-      }
-      await client.query(
-        'UPDATE order_items SET qty = $2, line_total = $2 * unit_price WHERE id = $1',
-        [item.id, qty]
-      );
-    }
+    const alerts = qty === undefined ? [] : await changeItemQty(client, order, item, Number(qty), req.user.id);
     if (note !== undefined) {
       await client.query('UPDATE order_items SET note = $2 WHERE id = $1', [item.id, note]);
     }
@@ -323,7 +299,7 @@ export async function nextRound(client, orderId) {
  */
 export async function addItem(client, order, input, userId, roundNo = 1, { byCustomer = false } = {}) {
   const qty = Number(input.qty ?? 1);
-  if (!(qty > 0)) throw new AppError(400, 'จำนวนต้องมากกว่า 0');
+  if (Number.isNaN(qty) || qty <= 0) throw new AppError(400, 'จำนวนต้องมากกว่า 0');
   // หมายเหตุต่อรายการ เช่น "ไม่ใส่พริก" ว่างเปล่าถือว่าไม่มี ยาวเกินตัดทิ้ง
   const note = String(input.note ?? '').trim().slice(0, 100) || null;
 
@@ -340,7 +316,7 @@ export async function addItem(client, order, input, userId, roundNo = 1, { byCus
   const short = await checkAvailability(client, item.id, qty);
   if (short.length) {
     throw new AppError(409,
-      `วัตถุดิบไม่พอสำหรับ "${item.name_th}" จำนวน ${qty} ${item.unit}: ${short.map((s) => `${s.name_th} (เหลือ ${s.qty_on_hand} ${s.unit} ต้องใช้ ${s.required})`).join(', ')}`,
+      `วัตถุดิบไม่พอสำหรับ "${item.name_th}" จำนวน ${qty} ${item.unit}: ${describeShortage(short)}`,
       short);
   }
 
@@ -367,6 +343,39 @@ export function dedupeAlerts(alerts) {
   const map = new Map();
   for (const a of alerts) map.set(a.ingredient_id, a);
   return [...map.values()];
+}
+
+/** รายการวัตถุดิบที่ขาด -> ข้อความ เช่น "หมูสไลซ์ (เหลือ 0.2 กก. ต้องใช้ 0.4)" */
+function describeShortage(short) {
+  return short.map((s) => s.name_th + ' (เหลือ ' + s.qty_on_hand + ' ' + s.unit + ' ต้องใช้ ' + s.required + ')').join(', ');
+}
+
+/**
+ * เปลี่ยนจำนวนของรายการในบิล แล้วตัด/คืนสต็อกตามส่วนต่าง
+ * คืนรายการวัตถุดิบที่ต่ำกว่าจุดสั่งซื้อ (Low Stock Alert)
+ */
+async function changeItemQty(client, order, item, qty, userId) {
+  if (Number.isNaN(qty) || qty <= 0) throw new AppError(400, 'จำนวนต้องมากกว่า 0 (ถ้าต้องการยกเลิกให้ใช้ DELETE)');
+  const diff = qty - Number(item.qty);
+  let alerts = [];
+  if (diff > 0) {
+    const short = await checkAvailability(client, item.menu_item_id, diff);
+    if (short.length) throw new AppError(409, `วัตถุดิบไม่พอสำหรับเพิ่มจำนวน: ${short.map((x) => x.name_th).join(', ')}`, short);
+  }
+  if (diff !== 0) {
+    alerts = await applyRecipe(client, {
+      menuItemId: item.menu_item_id,
+      qty: Math.abs(diff),
+      sign: diff > 0 ? -1 : 1,
+      refType: 'ORDER',
+      refId: order.id,
+      refNo: order.order_no,
+      userId,
+      note: `แก้ไขจำนวน ${item.qty} -> ${qty}`,
+    });
+  }
+  await client.query('UPDATE order_items SET qty = $2, line_total = $2 * unit_price WHERE id = $1', [item.id, qty]);
+  return alerts;
 }
 
 export default router;

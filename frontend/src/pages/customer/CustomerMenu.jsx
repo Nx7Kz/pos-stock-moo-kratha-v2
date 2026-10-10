@@ -188,13 +188,11 @@ export default function CustomerMenu() {
               {shown.map((m) => {
                 const inCart = cart[m.id] || 0;
                 const canAdd = !m.sold_out && !isBilling;
-                // แตะตรงไหนของการ์ดก็เพิ่มลงตะกร้าได้ ไม่ต้องเล็งที่ปุ่ม
-                const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
                 return (
-                  <div key={m.id} className={`menu-card cust-card${inCart > 0 ? ' in-cart' : ''}${m.sold_out ? ' sold-out' : ''}`}
-                    role="button" tabIndex={canAdd ? 0 : -1} aria-disabled={!canAdd}
-                    onClick={() => canAdd && add(m)}
-                    onKeyDown={(e) => canAdd && (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), add(m))}>
+                  <div key={m.id} className={`menu-card cust-card${inCart > 0 ? ' in-cart' : ''}${m.sold_out ? ' sold-out' : ''}`}>
+                    {/* ปุ่มโปร่งใสคลุมทั้งการ์ด: แตะตรงไหนของการ์ดก็เพิ่มลงตะกร้าได้ ไม่ต้องเล็งที่ปุ่ม */}
+                    <button type="button" className="card-hit" aria-label={`เพิ่ม ${m.name_th}`}
+                      onClick={() => add(m)} disabled={!canAdd} />
                     <MenuThumb item={m} />
                     {inCart > 0 && <span key={`b${inCart}`} className="thumb-count pop">{inCart}</span>}
                     <div className="menu-body">
@@ -202,17 +200,8 @@ export default function CustomerMenu() {
                       {m.description && <div className="menu-desc">{m.description}</div>}
                       <div className="menu-foot">
                         <span className="menu-price">{baht(m.price)}</span>
-                        {m.sold_out ? (
-                          <span className="pill pill-danger">หมด</span>
-                        ) : inCart > 0 ? (
-                          <div className="qty-box qty-lg">
-                            <button className="qty-btn" aria-label="ลดจำนวน" onClick={stop(() => setQty(m.id, inCart - 1))}>−</button>
-                            <span key={inCart} className="qty-num pop">{inCart}</span>
-                            <button className="qty-btn" aria-label="เพิ่มจำนวน" onClick={stop(() => setQty(m.id, inCart + 1))} disabled={isBilling}>+</button>
-                          </div>
-                        ) : (
-                          <button className="btn btn-accent add-btn" onClick={stop(() => add(m))} disabled={isBilling}>+ เพิ่ม</button>
-                        )}
+                        <CardAction item={m} inCart={inCart} isBilling={isBilling}
+                          onAdd={() => add(m)} onQty={(q) => setQty(m.id, q)} />
                       </div>
                     </div>
                   </div>
@@ -305,4 +294,19 @@ function MenuSkeleton({ tableNo }) {
       </div>
     </div>
   );
+}
+
+/** ปุ่มท้ายการ์ดเมนู: หมด / ปุ่ม − จำนวน + (มีในตะกร้าแล้ว) / ปุ่มเพิ่ม */
+function CardAction({ item, inCart, isBilling, onAdd, onQty }) {
+  if (item.sold_out) return <span className="pill pill-danger">หมด</span>;
+  if (inCart > 0) {
+    return (
+      <div className="qty-box qty-lg card-control">
+        <button type="button" className="qty-btn" aria-label="ลดจำนวน" onClick={() => onQty(inCart - 1)}>−</button>
+        <span key={inCart} className="qty-num pop">{inCart}</span>
+        <button type="button" className="qty-btn" aria-label="เพิ่มจำนวน" onClick={() => onQty(inCart + 1)} disabled={isBilling}>+</button>
+      </div>
+    );
+  }
+  return <button type="button" className="btn btn-accent add-btn card-control" onClick={onAdd} disabled={isBilling}>+ เพิ่ม</button>;
 }

@@ -57,7 +57,9 @@ export default function OrderList() {
           ))}
         </div>
 
-        {loading ? <SkeletonTable rows={8} cols={7} label="กำลังโหลดบิล…" /> : !rows.length ? <Empty icon="🧾">ไม่พบบิลในช่วงเวลาที่เลือก</Empty> : (
+        {loading && <SkeletonTable rows={8} cols={7} label="กำลังโหลดบิล…" />}
+        {!loading && !rows.length && <Empty icon="🧾">ไม่พบบิลในช่วงเวลาที่เลือก</Empty>}
+        {!loading && rows.length > 0 && (
           <div className="card">
             <div className="tbl-wrap">
               <table className="tbl">

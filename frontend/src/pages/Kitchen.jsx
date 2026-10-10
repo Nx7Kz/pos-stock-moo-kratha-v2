@@ -90,11 +90,6 @@ export default function Kitchen() {
     }
   }
 
-  function toggleFullscreen() {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen?.().catch(() => {});
-  }
-
   const minutes = (iso) => (Date.now() - new Date(iso).getTime()) / 60000;
 
   return (
@@ -116,14 +111,14 @@ export default function Kitchen() {
           ))}
         </div>
 
-        {loading ? <SkeletonCards kind="ticket" count={4} label="กำลังโหลดออเดอร์…" /> : !tickets.length ? (
-          <Empty icon="✅">ไม่มีรายการรอเสิร์ฟ</Empty>
-        ) : (
+        {loading && <SkeletonCards kind="ticket" count={4} label="กำลังโหลดออเดอร์…" />}
+        {!loading && !tickets.length && <Empty icon="✅">ไม่มีรายการรอเสิร์ฟ</Empty>}
+        {!loading && tickets.length > 0 && (
           <div className="k-grid">
             {tickets.map((t) => {
               const m = minutes(t.at);
-              const level = m >= LATE_MIN ? ' is-late' : m >= WARN_MIN ? ' is-warn' : '';
-              const label = `โต๊ะ ${t.table_no} ${t.round_no === 1 ? 'รอบแรก' : `รอบที่ ${t.round_no}`}`;
+              const level = waitLevel(m);
+              const label = `โต๊ะ ${t.table_no} ${roundName(t.round_no)}`;
               return (
                 <div key={t.key} className={`k-ticket${level}`}>
                   <div className="k-head">
@@ -169,3 +164,17 @@ export default function Kitchen() {
     </>
   );
 }
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen?.().catch(() => {});
+}
+
+/** สีเตือนตามเวลาที่รอ: เกิน 20 นาที = แดง, เกิน 10 นาที = เหลือง */
+function waitLevel(minutes) {
+  if (minutes >= LATE_MIN) return ' is-late';
+  if (minutes >= WARN_MIN) return ' is-warn';
+  return '';
+}
+
+const roundName = (n) => (n === 1 ? 'รอบแรก' : 'รอบที่ ' + n);

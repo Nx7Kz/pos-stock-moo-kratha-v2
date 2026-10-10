@@ -32,7 +32,8 @@ router.post('/', authRequired, wrap(async (req, res) => {
     }
 
     // เคยรับเงินบางส่วนไว้ แล้วยอดบิลลดลงจนเท่ากับเงินที่รับไว้พอดี -> ปิดบิลได้เลย ไม่ต้องรับเงินเพิ่ม
-    if (full.paid_amount > 0 && full.outstanding <= 0.001 && !(Number(amount) > 0)) {
+    const askedAmount = Number(amount) > 0;   // ไม่ส่ง amount มา (undefined) = ไม่ได้ขอรับเงินเพิ่ม
+    if (full.paid_amount > 0 && full.outstanding <= 0.001 && !askedAmount) {
       await client.query(
         `UPDATE orders SET status = 'PAID', closed_at = now(), closed_by = $2 WHERE id = $1`,
         [order.id, req.user.id]
@@ -152,7 +153,7 @@ router.get('/receipt/:orderId', authRequired, wrap(async (req, res) => {
       cashier: order.payments[0]?.cashier_name ?? order.closed_by_name,
       items: order.items
         .filter((i) => i.status !== 'CANCELLED')
-        .map((i) => ({ name_th: i.name_th, qty: Number(i.qty), unit_price: Number(i.unit_price), line_total: Number(i.line_total) })),
+        .map((i) => ({ id: i.id, name_th: i.name_th, qty: Number(i.qty), unit_price: Number(i.unit_price), line_total: Number(i.line_total) })),
       subtotal: order.subtotal,
       discount: order.discount,
       service_charge: order.service_charge,
@@ -161,7 +162,7 @@ router.get('/receipt/:orderId', authRequired, wrap(async (req, res) => {
       vat_included: settings.vat_included === 'true',
       grand_total: order.grand_total,
       payments: order.payments.map((p) => ({
-        method: p.method, amount: Number(p.amount),
+        receipt_no: p.receipt_no, method: p.method, amount: Number(p.amount),
         received: p.received === null ? null : Number(p.received),
         change_amount: Number(p.change_amount), reference_no: p.reference_no,
       })),

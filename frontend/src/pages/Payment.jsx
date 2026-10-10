@@ -75,12 +75,7 @@ export default function Payment() {
   const change = method === 'CASH' && receivedNum > 0 ? receivedNum - total : 0;
   const canPay = method !== 'CASH' || received === '' || receivedNum >= total;
 
-  const press = (k) => {
-    if (k === 'C') return setReceived('');
-    if (k === '⌫') return setReceived((v) => v.slice(0, -1));
-    if (k === '.' && received.includes('.')) return;
-    setReceived((v) => (v + k).replace(/^0(?=\d)/, ''));
-  };
+  const press = (k) => setReceived((v) => keypadInput(v, k));
 
   async function pay() {
     setBusy(true);
@@ -104,6 +99,7 @@ export default function Payment() {
     <>
       <TopBar title={`ชำระเงิน · โต๊ะ ${order.table_no}`} sub={`${order.order_no} · ${order.guest_count} ท่าน`}>
         <button className="btn" onClick={() => nav(`/order/${id}`)}>กลับไปแก้ไขบิล</button>
+        <button className="btn" onClick={() => nav(`/bill/${id}`)}>พิมพ์บิล + QR</button>
       </TopBar>
 
       <div className="content">
@@ -162,7 +158,7 @@ export default function Payment() {
                 {method === 'CASH' && (
                   <>
                     <div className="field">
-                      <label>รับเงินมา (เว้นว่าง = รับพอดี)</label>
+                      <div className="field-label">รับเงินมา (เว้นว่าง = รับพอดี)</div>
                       <div className="amount-display">{received || '0'}</div>
                     </div>
 
@@ -198,8 +194,8 @@ export default function Payment() {
 
                 {method === 'TRANSFER' && (
                   <div className="field">
-                    <label>เลขที่อ้างอิงการโอน</label>
-                    <input className="input" placeholder="เช่น TXN-20260827-0001"
+                    <label htmlFor="transfer-ref">เลขที่อ้างอิงการโอน</label>
+                    <input id="transfer-ref" className="input" placeholder="เช่น TXN-20260827-0001"
                       value={reference} onChange={(e) => setReference(e.target.value)} />
                   </div>
                 )}
@@ -213,8 +209,8 @@ export default function Payment() {
                       <div className="tiny faint">พร้อมเพย์ {qr.promptpay_id}</div>
                     </div>
                     <div className="field" style={{ width: '100%' }}>
-                      <label>เลขที่อ้างอิง (ถ้ามี)</label>
-                      <input className="input" placeholder="เลขอ้างอิงจากสลิป"
+                      <label htmlFor="qr-ref">เลขที่อ้างอิง (ถ้ามี)</label>
+                      <input id="qr-ref" className="input" placeholder="เลขอ้างอิงจากสลิป"
                         value={reference} onChange={(e) => setReference(e.target.value)} />
                     </div>
                   </div>
@@ -223,7 +219,7 @@ export default function Payment() {
                 </>)}
 
                 <button className="btn btn-accent btn-block btn-lg" onClick={pay} disabled={busy || (!settled && !canPay)}>
-                  {busy ? 'กำลังบันทึก…' : settled ? 'ปิดบิล' : `รับชำระ ${baht(total)} บาท`}
+                  {payButtonLabel(busy, settled, total)}
                 </button>
               </div>
             </div>
@@ -232,4 +228,18 @@ export default function Payment() {
       </div>
     </>
   );
+}
+
+/** แป้นตัวเลขรับเงิน: C = ล้าง, ⌫ = ลบตัวท้าย, จุดทศนิยมได้ครั้งเดียว, ตัด 0 นำหน้า */
+function keypadInput(value, key) {
+  if (key === 'C') return '';
+  if (key === '⌫') return value.slice(0, -1);
+  if (key === '.' && value.includes('.')) return value;
+  return (value + key).replace(/^0(?=\d)/, '');
+}
+
+function payButtonLabel(busy, settled, total) {
+  if (busy) return 'กำลังบันทึก…';
+  if (settled) return 'ปิดบิล';
+  return `รับชำระ ${baht(total)} บาท`;
 }

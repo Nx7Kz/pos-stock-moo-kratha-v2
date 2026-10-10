@@ -88,10 +88,7 @@ export default function MenuManage() {
                           : <span className="pill pill-billing">ยังไม่มีสูตร</span>}
                       </td>
                       <td className="num">
-                        {m.max_servable === null ? <span className="faint tiny">—</span>
-                          : m.max_servable <= 0 ? <span className="pill pill-danger">วัตถุดิบหมด</span>
-                          : <span className={m.max_servable <= 5 ? 'bold' : ''}
-                              style={m.max_servable <= 5 ? { color: 'var(--billing)' } : undefined}>{m.max_servable}</span>}
+                        <MaxServable value={m.max_servable} />
                       </td>
                       <td>
                         <span className={`pill ${m.is_available ? 'pill-free' : 'pill-muted'}`}>
@@ -132,7 +129,7 @@ function RecipeModal({ id, isOwner, onClose, onSaved, onImageChanged }) {
         setData(m.data);
         setPrice(String(m.data.price));
         setAvailable(m.data.is_available);
-        setLines(m.data.recipe.map((r) => ({ ingredient_id: String(r.ingredient_id), qty_per_unit: String(r.qty_per_unit) })));
+        setLines(m.data.recipe.map((r) => ({ key: newLineKey(), ingredient_id: String(r.ingredient_id), qty_per_unit: String(r.qty_per_unit) })));
         setIngredients(ing.data);
       })
       .catch((e) => toast(e.message, 'err'));
@@ -199,8 +196,8 @@ function RecipeModal({ id, isOwner, onClose, onSaved, onImageChanged }) {
 
         <div className="grid-3">
           <div className="field">
-            <label>ราคาขาย (บาท)</label>
-            <input className="input" type="number" min="0" step="1" value={price}
+            <label htmlFor="recipe-price">ราคาขาย (บาท)</label>
+            <input id="recipe-price" className="input" type="number" min="0" step="1" value={price}
               onChange={(e) => setPrice(e.target.value)} disabled={!isOwner} />
           </div>
           <div className="stat" style={{ boxShadow: 'none' }}>
@@ -222,11 +219,11 @@ function RecipeModal({ id, isOwner, onClose, onSaved, onImageChanged }) {
         </label>
 
         <div className="stack-sm">
-          <label className="bold small">วัตถุดิบที่ใช้ (ต่อ 1 {data.unit})</label>
+          <div className="bold small">วัตถุดิบที่ใช้ (ต่อ 1 {data.unit})</div>
           {lines.map((l, i) => {
             const ing = ingredients.find((x) => x.id === Number(l.ingredient_id));
             return (
-              <div key={i} className="row">
+              <div key={l.key} className="row">
                 <select className="select grow" value={l.ingredient_id} disabled={!isOwner}
                   onChange={(e) => setLine(i, { ingredient_id: e.target.value })}>
                   <option value="">— เลือกวัตถุดิบ —</option>
@@ -248,7 +245,7 @@ function RecipeModal({ id, isOwner, onClose, onSaved, onImageChanged }) {
           })}
           {!lines.length && <div className="muted small">ยังไม่มีสูตร — เมนูนี้จะไม่ตัดสต็อกเมื่อขาย</div>}
           {isOwner && (
-            <button className="btn btn-sm" onClick={() => setLines((ls) => [...ls, { ingredient_id: '', qty_per_unit: '' }])}>
+            <button className="btn btn-sm" onClick={() => setLines((ls) => [...ls, { key: newLineKey(), ingredient_id: '', qty_per_unit: '' }])}>
               + เพิ่มวัตถุดิบ
             </button>
           )}
@@ -348,32 +345,32 @@ function CreateMenuModal({ categories, onClose, onDone }) {
 
         <div className="grid-2">
           <div className="field">
-            <label>รหัสเมนู (SKU)</label>
-            <input className="input" value={f.sku} onChange={(e) => set({ sku: e.target.value })} placeholder="MN-B20" />
+            <label htmlFor="new-sku">รหัสเมนู (SKU)</label>
+            <input id="new-sku" className="input" value={f.sku} onChange={(e) => set({ sku: e.target.value })} placeholder="MN-B20" />
           </div>
           <div className="field">
-            <label>หมวดหมู่</label>
-            <select className="select" value={f.category_code} onChange={(e) => set({ category_code: e.target.value })}>
+            <label htmlFor="new-category">หมวดหมู่</label>
+            <select id="new-category" className="select" value={f.category_code} onChange={(e) => set({ category_code: e.target.value })}>
               {categories.map((c) => <option key={c.id} value={c.code}>{c.name_th}</option>)}
             </select>
           </div>
         </div>
         <div className="field">
-          <label>ชื่อเมนู</label>
-          <input className="input" value={f.name_th} onChange={(e) => set({ name_th: e.target.value })} />
+          <label htmlFor="new-name">ชื่อเมนู</label>
+          <input id="new-name" className="input" value={f.name_th} onChange={(e) => set({ name_th: e.target.value })} />
         </div>
         <div className="field">
-          <label>คำอธิบาย</label>
-          <input className="input" value={f.description} onChange={(e) => set({ description: e.target.value })} />
+          <label htmlFor="new-desc">คำอธิบาย</label>
+          <input id="new-desc" className="input" value={f.description} onChange={(e) => set({ description: e.target.value })} />
         </div>
         <div className="grid-2">
           <div className="field">
-            <label>ราคาขาย (บาท)</label>
-            <input className="input" type="number" min="0" value={f.price} onChange={(e) => set({ price: e.target.value })} />
+            <label htmlFor="new-price">ราคาขาย (บาท)</label>
+            <input id="new-price" className="input" type="number" min="0" value={f.price} onChange={(e) => set({ price: e.target.value })} />
           </div>
           <div className="field">
-            <label>หน่วย</label>
-            <input className="input" value={f.unit} onChange={(e) => set({ unit: e.target.value })} />
+            <label htmlFor="new-unit">หน่วย</label>
+            <input id="new-unit" className="input" value={f.unit} onChange={(e) => set({ unit: e.target.value })} />
           </div>
         </div>
       </div>
@@ -414,6 +411,9 @@ function MenuImageEditor({ item, isOwner, onChanged }) {
     }
   }
 
+  let uploadLabel = item.image_url ? 'เปลี่ยนรูป' : 'ใส่รูป';
+  if (busy) uploadLabel = 'กำลังอัปโหลด…';
+
   return (
     <div className="img-editor">
       <MenuThumb item={item} key={item.image_url || 'none'} className="img-editor-thumb" />
@@ -426,7 +426,7 @@ function MenuImageEditor({ item, isOwner, onChanged }) {
         {isOwner && (
           <div className="row wrap">
             <label className={`btn btn-sm${busy ? ' disabled' : ''}`}>
-              {busy ? 'กำลังอัปโหลด…' : item.image_url ? 'เปลี่ยนรูป' : 'ใส่รูป'}
+              {uploadLabel}
               <input type="file" accept="image/*" hidden disabled={busy}
                 onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ''; }} />
             </label>
@@ -440,3 +440,15 @@ function MenuImageEditor({ item, isOwner, onChanged }) {
     </div>
   );
 }
+
+/** จำนวนที่ทำได้สูงสุดจากวัตถุดิบคงเหลือ: ไม่มีสูตร = — , หมด = ป้ายแดง, เหลือน้อย = ตัวหนาสีเหลือง */
+function MaxServable({ value }) {
+  if (value === null) return <span className="faint tiny">—</span>;
+  if (value <= 0) return <span className="pill pill-danger">วัตถุดิบหมด</span>;
+  if (value <= 5) return <span className="bold" style={{ color: 'var(--billing)' }}>{value}</span>;
+  return <span>{value}</span>;
+}
+
+/** key ประจำบรรทัดสูตรที่เพิ่ม/ลบได้ */
+let lineSeq = 0;
+const newLineKey = () => ++lineSeq;

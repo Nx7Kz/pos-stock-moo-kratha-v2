@@ -13,7 +13,8 @@
     "db:demo": "node scripts/demo-data.js",
     "db:backup": "node scripts/backup.js",
     "db:restore": "node scripts/restore.js",
-    "test": "node tests/api.test.mjs"
+    "test": "node tests/api.test.mjs",
+    "test:coverage": "c8 node tests/coverage.mjs && node tests/lcov-paths.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -23,5 +24,8 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "c8": "^12.0.0"
   }
 }

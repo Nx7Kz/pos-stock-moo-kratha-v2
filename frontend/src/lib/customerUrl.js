@@ -2,7 +2,14 @@ import { api } from './api';
 
 export const isLocalHost = (url) => /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(url);
 
-const withPort = (host) => `${location.protocol}//${host}${location.port ? `:${location.port}` : ''}`;
+const withPort = (host) => location.protocol + '//' + host + (location.port ? ':' + location.port : '');
+
+/** ตัด / ท้ายที่อยู่เว็บออก (ลูปแทน regex /\/+$/ ที่ช้าได้กับข้อความยาว ๆ) */
+export function trimTrailingSlashes(s) {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === '/') end--;
+  return s.slice(0, end);
+}
 
 /** ที่อยู่ตั้งต้น: ค่าที่บันทึกไว้ > ที่อยู่ที่เปิดอยู่ (ถ้าไม่ใช่ localhost) > IP ของเครื่องในวง LAN */
 export function defaultBase(saved, lan) {
@@ -26,9 +33,11 @@ export async function getCustomerBase() {
 export async function getQrInfo() {
   const r = await api.get('/tables/qr-info');
   const lan = r.data.lan_addresses || [];
-  return { base: defaultBase(r.data.customer_base_url, lan).replace(/\/+$/, ''), saved: r.data.customer_base_url, lan };
+  return { base: trimTrailingSlashes(defaultBase(r.data.customer_base_url, lan)), saved: r.data.customer_base_url, lan };
 }
 
 /** ลิงก์หน้าสั่งอาหารของโต๊ะ ถ้าใส่รหัสมาด้วย ลูกค้าสแกนแล้วเข้าได้เลยไม่ต้องกรอก */
-export const customerUrl = (base, tableNo, code) =>
-  `${base}/customer/${encodeURIComponent(tableNo)}${code ? `?code=${encodeURIComponent(code)}` : ''}`;
+export function customerUrl(base, tableNo, code) {
+  const query = code ? '?code=' + encodeURIComponent(code) : '';
+  return `${base}/customer/${encodeURIComponent(tableNo)}${query}`;
+}

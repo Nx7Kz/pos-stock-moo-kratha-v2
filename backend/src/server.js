@@ -25,6 +25,7 @@ import publicRoutes from './routes/public.js';
 import kitchenRoutes from './routes/kitchen.js';
 
 const app = express();
+app.disable('x-powered-by');   // ไม่บอกคนนอกว่าเซิร์ฟเวอร์ใช้ Express รุ่นไหน
 const PORT = Number(process.env.PORT || 4000);
 
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') ?? true }));

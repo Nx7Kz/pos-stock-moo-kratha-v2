@@ -94,7 +94,7 @@ async function main() {
           await consume(client, bomOf.get(l.m.id) ?? [], l.qty, order.id, orderNo, staff, openedAt);
         }
 
-        const method = Math.random() < 0.5 ? 'CASH' : Math.random() < 0.6 ? 'QR' : 'TRANSFER';
+        const method = pickMethod();
         const received = method === 'CASH' ? Math.ceil(grand / 100) * 100 : null;
         const receiptNo = await docNo(client, 'payments', 'receipt_no', 'RC', closedAt);
         await client.query(
@@ -193,7 +193,15 @@ async function docNo(client, table, column, prefix, at) {
   return `${prefix}${code}-${String(rows[0].seq).padStart(4, '0')}`;
 }
 
-main().catch((err) => {
+/** ช่องทางชำระเงินสมมุติ: เงินสด ~50% / QR ~30% / โอน ~20% */
+function pickMethod() {
+  if (Math.random() < 0.5) return 'CASH';
+  return Math.random() < 0.6 ? 'QR' : 'TRANSFER';
+}
+
+try {
+  await main();
+} catch (err) {
   console.error('\n  สร้างข้อมูลสาธิตไม่สำเร็จ:', err.message);
   process.exit(1);
-});
+}

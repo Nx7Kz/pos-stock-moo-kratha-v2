@@ -47,5 +47,9 @@ URL ที่อยู่ในเครื่องเดียวกันใ�
 ## หมายเหตุ
 
 - ใช้ RAM ประมาณ 2–3 GB ตอนเปิด
-- ยังไม่มี **Coverage** (เปอร์เซ็นต์โค้ดที่ชุดทดสอบครอบคลุม) เพราะชุดทดสอบยิง API จากภายนอก ไม่ได้วัด coverage
+- **Coverage:** `sonar_scan.py` รัน `npm run test:coverage` ใน backend ก่อนตรวจทุกครั้ง
+  - ทำงานบนฐานข้อมูลทดสอบแยก (`pos_stock_test`) แล้วลบทิ้ง ไม่แตะข้อมูลร้าน
+  - ส่งผลให้ SonarQube ทาง `backend/coverage/lcov.info`
+  - ถ้าชุดทดสอบไม่ผ่านจะหยุด ไม่ตรวจต่อ ใส่ `--no-coverage` เพื่อข้ามการวัด
+  - **ไม่นับ coverage** ของ `frontend/**` (ยังไม่มีชุดทดสอบหน้าเว็บ) และ `backend/scripts/**` (สคริปต์ที่รันด้วยมือ) เหตุผลอยู่ใน `sonar-project.properties`
 - ถ้าลบ volume ของ SonarQube (`docker compose -f sonar/docker-compose.yml down -v`) ให้ลบ `sonar/.env` ด้วย แล้วรัน `sonar_scan.py` ใหม่

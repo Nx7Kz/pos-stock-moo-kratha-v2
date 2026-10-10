@@ -76,7 +76,8 @@ export default function StockPage() {
           <button className={`cat-tab${tab === 'moves' ? ' active' : ''}`} onClick={() => setTab('moves')}>ประวัติการเคลื่อนไหว</button>
         </div>
 
-        {loading ? <SkeletonTable rows={10} cols={8} label="กำลังโหลดคลังวัตถุดิบ…" /> : tab === 'stock' ? (
+        {loading && <SkeletonTable rows={10} cols={8} label="กำลังโหลดคลังวัตถุดิบ…" />}
+        {!loading && tab === 'stock' && (
           <div className="card">
             <div className="card-head">
               <h2>วัตถุดิบคงเหลือ</h2>
@@ -100,7 +101,7 @@ export default function StockPage() {
                   {shown.map((r) => {
                     const st = STOCK_STATUS[r.stock_status];
                     const pct = r.min_qty > 0 ? Math.min((r.qty_on_hand / (r.min_qty * 2)) * 100, 100) : 100;
-                    const color = r.stock_status === 'OK' ? 'var(--free)' : r.stock_status === 'WARNING' ? 'var(--billing)' : 'var(--danger)';
+                    const color = STATUS_COLOR[r.stock_status] || 'var(--danger)';
                     return (
                       <tr key={r.id}>
                         <td className="tiny faint">{r.sku}</td>
@@ -124,7 +125,8 @@ export default function StockPage() {
               </table>
             </div>
           </div>
-        ) : (
+        )}
+        {!loading && tab === 'moves' && (
           <div className="card">
             <div className="card-head">
               <h2>ประวัติการเคลื่อนไหววัตถุดิบ</h2>
@@ -189,7 +191,7 @@ function StockDocModal({ type, rows, onClose, onDone }) {
   const toast = useToast();
   const [supplier, setSupplier] = useState('');
   const [note, setNote] = useState('');
-  const [lines, setLines] = useState([{ ingredient_id: '', qty: '', unit_cost: '' }]);
+  const [lines, setLines] = useState(() => [{ key: newLineKey(), ingredient_id: '', qty: '', unit_cost: '' }]);
   const [busy, setBusy] = useState(false);
 
   const isIn = type === 'IN';
@@ -243,18 +245,18 @@ function StockDocModal({ type, rows, onClose, onDone }) {
       <div className="stack">
         {isIn && (
           <div className="field">
-            <label>ผู้จำหน่าย / แหล่งที่มา</label>
-            <input className="input" value={supplier} onChange={(e) => setSupplier(e.target.value)}
+            <label htmlFor="doc-supplier">ผู้จำหน่าย / แหล่งที่มา</label>
+            <input id="doc-supplier" className="input" value={supplier} onChange={(e) => setSupplier(e.target.value)}
               placeholder="เช่น ตลาดสดเทศบาลกาญจนบุรี" />
           </div>
         )}
 
         <div className="stack-sm">
-          <label className="bold small">รายการวัตถุดิบ</label>
+          <div className="bold small">รายการวัตถุดิบ</div>
           {lines.map((l, i) => {
             const ing = rows.find((r) => r.id === Number(l.ingredient_id));
             return (
-              <div key={i} className="row">
+              <div key={l.key} className="row">
                 <select className="select grow" value={l.ingredient_id} onChange={(e) => setLine(i, { ingredient_id: e.target.value })}>
                   <option value="">— เลือกวัตถุดิบ —</option>
                   {rows.map((r) => (
@@ -274,14 +276,14 @@ function StockDocModal({ type, rows, onClose, onDone }) {
               </div>
             );
           })}
-          <button className="btn btn-sm" onClick={() => setLines((ls) => [...ls, { ingredient_id: '', qty: '', unit_cost: '' }])}>
+          <button className="btn btn-sm" onClick={() => setLines((ls) => [...ls, { key: newLineKey(), ingredient_id: '', qty: '', unit_cost: '' }])}>
             + เพิ่มรายการ
           </button>
         </div>
 
         <div className="field">
-          <label>หมายเหตุ</label>
-          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} />
+          <label htmlFor="doc-note">หมายเหตุ</label>
+          <input id="doc-note" className="input" value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
       </div>
     </Modal>
@@ -340,8 +342,8 @@ function AdjustModal({ row, onClose, onDone }) {
           </div>
         )}
         <div className="field">
-          <label>หมายเหตุ</label>
-          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น นับสต็อกสิ้นวัน" />
+          <label htmlFor="adjust-note">หมายเหตุ</label>
+          <input id="adjust-note" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น นับสต็อกสิ้นวัน" />
         </div>
       </div>
     </Modal>
@@ -357,3 +359,9 @@ function Stat({ label, value, note, small, danger }) {
     </div>
   );
 }
+
+const STATUS_COLOR = { OK: 'var(--free)', WARNING: 'var(--billing)' };
+
+/** key ประจำบรรทัดที่เพิ่ม/ลบได้ (ไม่ใช้ลำดับในอาร์เรย์ ซึ่งเลื่อนเมื่อลบบรรทัด) */
+let lineSeq = 0;
+const newLineKey = () => ++lineSeq;

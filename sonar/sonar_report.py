@@ -51,7 +51,8 @@ def grade(v):
 
 def build_html(admin):
     keys = ('bugs,vulnerabilities,security_hotspots,code_smells,duplicated_lines_density,ncloc,files,'
-            'reliability_rating,security_rating,sqale_rating,security_review_rating,sqale_index,complexity')
+            'reliability_rating,security_rating,sqale_rating,security_review_rating,sqale_index,complexity,'
+            'coverage,line_coverage,branch_coverage')
     m = api('GET', '/api/measures/component', admin, {'component': PROJECT, 'metricKeys': keys})
     v = {x['metric']: x.get('value') for x in m['component']['measures']}
     gate = api('GET', '/api/qualitygates/project_status', admin, {'projectKey': PROJECT})['projectStatus']
@@ -123,6 +124,7 @@ def build_html(admin):
   {card('โค้ดซ้ำ', (v.get('duplicated_lines_density') or '0') + '%', 'ของบรรทัดทั้งหมด')}
   {card('Technical Debt', f'{debt_h} ชม.', 'เวลาที่ใช้แก้ Code Smells ทั้งหมด')}
   {card('Complexity', v.get('complexity', '-'), 'ความซับซ้อนรวม')}
+  {card('Coverage', (v.get('coverage') or '-') + '%', f"backend · บรรทัด {v.get('line_coverage', '-')}% · เงื่อนไข {v.get('branch_coverage', '-')}%")}
 </div>
 
 <h2>เงื่อนไข Quality Gate</h2>

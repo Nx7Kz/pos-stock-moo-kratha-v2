@@ -5,7 +5,7 @@
   - เปลี่ยนรหัสผ่าน admin จากค่าเริ่มต้น (admin/admin) เป็นรหัสสุ่ม
   - สร้างโปรเจกต์ + token สำหรับ scanner
   - บันทึกรหัส/token ไว้ใน sonar/.env (ไฟล์นี้ไม่ขึ้น git)
-จากนั้นรัน sonar-scanner (ผ่าน Docker) รอผลตรวจ แล้วสรุปผลบนหน้าจอ
+จากนั้นวัด coverage (ชุดทดสอบ API บนฐานข้อมูลทดสอบแยก) รัน sonar-scanner (ผ่าน Docker) รอผลตรวจ แล้วสรุปผลบนหน้าจอ
 
 ต้องเปิด SonarQube ก่อน:  docker compose -f sonar/docker-compose.yml up -d
 ใช้แค่ Python standard library ไม่ต้อง pip install อะไร
@@ -106,6 +106,21 @@ def first_time_setup(env):
     return admin
 
 
+def run_coverage():
+    """รันชุดทดสอบ API ภายใต้ c8 -> backend/coverage/lcov.info (ใช้ฐานข้อมูลทดสอบแยก ไม่แตะข้อมูลร้าน)"""
+    if '--no-coverage' in sys.argv:
+        print('  ข้ามการวัด coverage (--no-coverage) — ใช้ผลเดิมใน backend/coverage ถ้ามี')
+        return
+    print('  กำลังวัด coverage (npm run test:coverage) ...')
+    p = subprocess.run('npm run test:coverage', cwd=os.path.join(ROOT, 'backend'), shell=True,
+                       capture_output=True, text=True, encoding='utf-8', errors='replace')
+    tail = [l for l in p.stdout.splitlines() if 'ผ่าน' in l and 'ไม่ผ่าน' in l or l.startswith(('Lines', 'Branches'))]
+    print('\n'.join('    ' + l.strip() for l in tail))
+    if p.returncode != 0:
+        print(p.stdout[-3000:], p.stderr[-2000:])
+        sys.exit('  ชุดทดสอบไม่ผ่าน หรือวัด coverage ไม่สำเร็จ — แก้ให้ผ่านก่อนตรวจ')
+
+
 def run_scanner(token):
     """รัน sonar-scanner ผ่าน Docker (ไม่ต้องติดตั้ง Java / scanner ในเครื่อง)"""
     scanner_host = HOST.replace('localhost', 'host.docker.internal').replace('127.0.0.1', 'host.docker.internal')
@@ -158,6 +173,7 @@ if __name__ == '__main__':
     wait_until_up()
     env = load_env()
     admin = first_time_setup(env)
+    run_coverage()
     task = run_scanner(env['SONAR_TOKEN'])
     if task and wait_task(admin, task) != 'SUCCESS':
         sys.exit('  ประมวลผลผลตรวจไม่สำเร็จ ดูที่ ' + HOST + '/admin/background_tasks')

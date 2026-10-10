@@ -423,6 +423,19 @@ check('ค่าถูกต้องบันทึกได้ และจั
 await call('PATCH', '/settings', { vat_rate: settingsBefore.vat_rate, vat_included: settingsBefore.vat_included, promptpay_id: settingsBefore.promptpay_id });
 x = await call('POST', '/orders', { table_no: 'T16', items: [{ menu_sku: 'MN-D01', qty: 1 }] });
 check('หลังแก้ตั้งค่า เปิดบิลคิดยอดได้ปกติ', x.status === 201 && Number.isFinite(Number(x.json.order.grand_total)), x.json);
+{
+  // เลขอ้างอิงพร้อมเพย์ 15 หลัก (e-wallet จากแอปธนาคาร) -> QR ใส่ยอดของบิลให้
+  const ppId = x.json.order.id;
+  let y = await call('PATCH', '/settings', { promptpay_id: '004-999-000000001' });
+  check('พร้อมเพย์เลขอ้างอิง 15 หลักบันทึกได้', y.status === 200 && y.json.data.promptpay_id === '004999000000001', y.json);
+  y = await call('GET', `/payments/qr/${ppId}`);
+  const p = y.json.data?.qr_payload ?? '';
+  check('QR ของเลข 15 หลัก ใช้ช่อง e-wallet (03) และใส่ยอดบิล',
+    y.status === 200 && p.includes('0315004999000000001') && p.includes(`54${String(Number(y.json.data.amount).toFixed(2).length).padStart(2, '0')}${Number(y.json.data.amount).toFixed(2)}`), y.json);
+  y = await call('PATCH', '/settings', { promptpay_id: '12345678901234' });
+  check('พร้อมเพย์ 14 หลัก -> 400', y.status === 400, y.json);
+  await call('PATCH', '/settings', { promptpay_id: settingsBefore.promptpay_id });
+}
 await call('POST', `/orders/${x.json.order.id}/void`, { reason: 'cleanup' });
 
 console.log('\n=== 15.4 ส่วนลดต้องไม่เกินยอดรวม ===');
